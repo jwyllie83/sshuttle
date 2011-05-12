@@ -12,6 +12,8 @@ def got_signal(signum, frame):
 
 
 _pidname = None
+IP_TRANSPARENT = 19
+
 def check_daemon(pidfile):
     global _pidname
     _pidname = os.path.abspath(pidfile)
@@ -96,15 +98,16 @@ def original_dst(sock):
 
 
 class FirewallClient:
-    def __init__(self, port, subnets_include, subnets_exclude, dnsport):
+    def __init__(self, port, subnets_include, subnets_exclude, dnsport, ipv6):
         self.port = port
         self.auto_nets = []
         self.subnets_include = subnets_include
         self.subnets_exclude = subnets_exclude
         self.dnsport = dnsport
+        self.ipv6 = ipv6
         argvbase = ([sys.argv[1], sys.argv[0], sys.argv[1]] +
                     ['-v'] * (helpers.verbose or 0) +
-                    ['--firewall', str(port), str(dnsport)])
+                    ['--firewall', str(port), str(dnsport), str(ipv6 or '0')])
         if ssyslog._p:
             argvbase += ['--syslog']
         argv_tries = [
@@ -176,7 +179,7 @@ class FirewallClient:
 
 
 def _main(listener, fw, ssh_cmd, remotename, python, latency_control,
-          dnslistener, seed_hosts, auto_nets,
+          dnslistener, ipv6, seed_hosts, auto_nets,
           syslog, daemon):
     handlers = []
     if helpers.verbose >= 1:
@@ -188,7 +191,7 @@ def _main(listener, fw, ssh_cmd, remotename, python, latency_control,
     try:
         (serverproc, serversock) = ssh.connect(ssh_cmd, remotename, python,
                         stderr=ssyslog._p and ssyslog._p.stdin,
-                        options=dict(latency_control=latency_control))
+                        options=dict(latency_control=latency_control, ipv6=ipv6))
     except socket.error, e:
         if e.args[0] == errno.EPIPE:
             raise Fatal("failed to establish ssh session (1)")
@@ -272,7 +275,10 @@ def _main(listener, fw, ssh_cmd, remotename, python, latency_control,
                 return
             else:
                 raise
-        dstip = original_dst(sock)
+        if ipv6:
+            dstip = sock.getsockname();
+        else:
+            dstip = original_dst(sock)
         debug1('Accept: %s:%r -> %s:%r.\n' % (srcip[0],srcip[1],
                                               dstip[0],dstip[1]))
         if dstip[1] == listener.getsockname()[1] and islocal(dstip[0]):
@@ -284,7 +290,7 @@ def _main(listener, fw, ssh_cmd, remotename, python, latency_control,
             log('warning: too many open channels.  Discarded connection.\n')
             sock.close()
             return
-        mux.send(chan, ssnet.CMD_CONNECT, '%s,%s' % dstip)
+        mux.send(chan, ssnet.CMD_CONNECT, '%s,%r' % (dstip[0], dstip[1]))
         outwrap = MuxWrapper(mux, chan)
         handlers.append(Proxy(SockWrapper(sock, sock), outwrap))
     handlers.append(Handler([listener], onaccept))
@@ -329,7 +335,7 @@ def _main(listener, fw, ssh_cmd, remotename, python, latency_control,
 
 
 def main(listenip, ssh_cmd, remotename, python, latency_control, dns,
-         seed_hosts, auto_nets,
+         ipv6, seed_hosts, auto_nets,
          subnets_include, subnets_exclude, syslog, daemon, pidfile):
     if syslog:
         ssyslog.start_syslog()
@@ -350,9 +356,19 @@ def main(listenip, ssh_cmd, remotename, python, latency_control, dns,
     debug2('Binding:')
     for port in ports:
         debug2(' %d' % port)
-        listener = socket.socket()
+        if ipv6:
+            listener = socket.socket(socket.AF_INET6)
+        else:
+            listener = socket.socket(socket.AF_INET)
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        dnslistener = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            listener.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
+        except socket.error, e:
+            last_e = e
+        if ipv6:
+            dnslistener = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+        else:
+            dnslistener = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         dnslistener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             listener.bind((listenip[0], port))
@@ -377,12 +393,13 @@ def main(listenip, ssh_cmd, remotename, python, latency_control, dns,
         dnsport = 0
         dnslistener = None
 
-    fw = FirewallClient(listenip[1], subnets_include, subnets_exclude, dnsport)
+    fw = FirewallClient(listenip[1], subnets_include, subnets_exclude, dnsport, ipv6)
     
     try:
         return _main(listener, fw, ssh_cmd, remotename,
                      python, latency_control, dnslistener,
-                     seed_hosts, auto_nets, syslog, daemon)
+                     ipv6, seed_hosts, auto_nets, syslog, 
+                     daemon)
     finally:
         try:
             if daemon:

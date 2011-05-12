@@ -166,7 +166,7 @@ def main():
     else:
         helpers.logprefix = 'server: '
     debug1('latency control setting = %r\n' % latency_control)
-
+    debug1('IPv6 mode = %r\n' % ipv6)
     routes = list(list_routes())
     debug1('available routes:\n')
     for r in routes:
@@ -215,7 +215,7 @@ def main():
     def new_channel(channel, data):
         (dstip,dstport) = data.split(',', 1)
         dstport = int(dstport)
-        outwrap = ssnet.connect_dst(dstip,dstport)
+        outwrap = ssnet.connect_dst(dstip,dstport,ipv6)
         handlers.append(Proxy(MuxWrapper(mux, channel), outwrap))
     mux.new_channel = new_channel
 

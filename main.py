@@ -25,6 +25,23 @@ def parse_subnets(subnets_str):
         subnets.append(('%d.%d.%d.%d' % (a,b,c,d), width))
     return subnets
 
+# list of:
+# 1:2::3/64 or just 1:2::3
+def parse_subnets6(subnets_str):
+    subnets = []
+    for s in subnets_str:
+        m = re.match(r'(?:([a-fA-F\d:]+))?(?:/(\d+))?$', s)
+        if not m:
+            raise Fatal('%r is not a valid IP subnet format' % s)
+        (net,width) = m.groups()
+        if width == None:
+            width = 128
+        else:
+            width = int(width)
+        if width > 128:
+            raise Fatal('*/%d is greater than the maximum of 128' % width)
+        subnets.append((net, width))
+    return subnets
 
 # 1.2.3.4:567 or just 1.2.3.4 or just 567
 def parse_ipport(s):
@@ -43,6 +60,16 @@ def parse_ipport(s):
         a = b = c = d = 0
     return ('%d.%d.%d.%d' % (a,b,c,d), port)
 
+# [1:2::3]:456 or [1:2::3] or 456
+
+def parse_ipport6(s):
+    s = str(s)
+    m = re.match(r'(?:\[([^]]*)])?(?::)?(?:(\d+))?$', s)
+    if not m:
+        raise Fatal('%s is not a valid IP:port format' % s)
+    (ip,port) = m.groups()
+    (ip,port) = (ip or '::', int(port or 0))
+    return (ip, port)
 
 optspec = """
 sshuttle [-l [ip:]port] [-r [username@]sshserver[:port]] <subnets...>
@@ -50,10 +77,11 @@ sshuttle --server
 sshuttle --firewall <port> <subnets...>
 sshuttle --hostwatch
 --
-l,listen=  transproxy to this ip address and port number [127.0.0.1:0]
+l,listen=  transproxy to this ip address and port number
 H,auto-hosts scan for remote hostnames and update local /etc/hosts
 N,auto-nets  automatically determine subnets to route
 dns        capture local DNS requests and forward to the remote DNS server
+6,ipv6     mode for dealing with IPv6
 python=    path to python interpreter on the remote server
 r,remote=  ssh hostname (and optional username) of remote sshuttle server
 x,exclude= exclude this subnet (can be used more than once)
@@ -84,18 +112,23 @@ try:
         if len(extra) != 0:
             o.fatal('no arguments expected')
         server.latency_control = opt.latency_control
+        server.ipv6 = opt.ipv6
         sys.exit(server.main())
     elif opt.firewall:
-        if len(extra) != 2:
-            o.fatal('exactly two arguments expected')
-        sys.exit(firewall.main(int(extra[0]), int(extra[1]), opt.syslog))
+        if len(extra) != 3:
+            o.fatal('exactly three arguments expected')
+        sys.exit(firewall.main(int(extra[0]), int(extra[1]), 
+                               int(extra[2]), opt.syslog))
     elif opt.hostwatch:
         sys.exit(hostwatch.hw_main(extra))
     else:
         if len(extra) < 1 and not opt.auto_nets:
             o.fatal('at least one subnet (or -N) expected')
         includes = extra
-        excludes = ['127.0.0.0/8']
+        if not opt.ipv6:
+            excludes = ['127.0.0.0/8']
+        else:
+            excludes = [] #FIXME
         for k,v in flags:
             if k in ('-x','--exclude'):
                 excludes.append(v)
@@ -110,16 +143,23 @@ try:
             sh = []
         else:
             sh = None
-        sys.exit(client.main(parse_ipport(opt.listen or '0.0.0.0:0'),
+        if opt.ipv6:
+            ipport = parse_ipport6(opt.listen or '[::]:0')
+            do_parse_subnets = parse_subnets6
+        else:
+            ipport = parse_ipport(opt.listen or '127.0.0.1:0')
+            do_parse_subnets = parse_subnets
+        sys.exit(client.main(ipport,
                              opt.ssh_cmd,
                              remotename,
                              opt.python,
                              opt.latency_control,
                              opt.dns,
+                             opt.ipv6,
                              sh,
                              opt.auto_nets,
-                             parse_subnets(includes),
-                             parse_subnets(excludes),
+                             do_parse_subnets(includes),
+                             do_parse_subnets(excludes),
                              opt.syslog, opt.daemon, opt.pidfile))
 except Fatal, e:
     log('fatal: %s\n' % e)

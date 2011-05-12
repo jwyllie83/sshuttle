@@ -511,9 +511,12 @@ class MuxWrapper(SockWrapper):
                             % (cmd, len(data)))
 
 
-def connect_dst(ip, port):
+def connect_dst(ip, port, ipv6):
     debug2('Connecting to %s:%d\n' % (ip, port))
-    outsock = socket.socket()
+    if ipv6:
+        outsock = socket.socket(socket.AF_INET6)
+    else:
+        outsock = socket.socket(socket.AF_INET)
     outsock.setsockopt(socket.SOL_IP, socket.IP_TTL, 42)
     return SockWrapper(outsock, outsock,
                        connect_to = (ip,port),

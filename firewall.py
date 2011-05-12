@@ -14,8 +14,14 @@ def nonfatal(func, *args):
         log('error: %s\n' % e)
 
 
-def ipt_chain_exists(name):
-    argv = ['iptables', '-t', 'nat', '-nL']
+def ipt_chain_exists(name, ipv6):
+    if ipv6:
+        table = 'mangle'
+        cmd = 'ip6tables'
+    else:
+        table = 'nat'
+        cmd = 'iptables'
+    argv = [cmd, '-t', table, '-nL']
     p = ssubprocess.Popen(argv, stdout = ssubprocess.PIPE)
     for line in p.stdout:
         if line.startswith('Chain %s ' % name):
@@ -27,6 +33,13 @@ def ipt_chain_exists(name):
 
 def ipt(*args):
     argv = ['iptables', '-t', 'nat'] + list(args)
+    debug1('>> %s\n' % ' '.join(argv))
+    rv = ssubprocess.call(argv)
+    if rv:
+        raise Fatal('%r returned %d' % (argv, rv))
+
+def ipt6(*args):
+    argv = ['ip6tables', '-t', 'mangle'] + list(args)
     debug1('>> %s\n' % ' '.join(argv))
     rv = ssubprocess.call(argv)
     if rv:
@@ -59,11 +72,11 @@ def ipt_ttl(*args):
 # multiple copies shouldn't have overlapping subnets, or only the most-
 # recently-started one will win (because we use "-I OUTPUT 1" instead of
 # "-A OUTPUT").
-def do_iptables(port, dnsport, subnets):
+def do_iptables(port, dnsport, ipv6, subnets):
     chain = 'sshuttle-%s' % port
 
     # basic cleanup/setup of chains
-    if ipt_chain_exists(chain):
+    if ipt_chain_exists(chain, ipv6):
         nonfatal(ipt, '-D', 'OUTPUT', '-j', chain)
         nonfatal(ipt, '-D', 'PREROUTING', '-j', chain)
         nonfatal(ipt, '-F', chain)
@@ -101,6 +114,51 @@ def do_iptables(port, dnsport, subnets):
                     '--dport', '53',
                     '--to-ports', str(dnsport))
 
+def do_ip6tables(port, dnsport, ipv6, subnets):
+    mark_chain   = 'sshuttle-m-%s' % port
+    tproxy_chain = 'sshuttle-t-%s' % port
+
+    # basic cleanup/setup of chains
+    if ipt_chain_exists(mark_chain, ipv6):
+        ipt6('-D', 'OUTPUT', '-j', mark_chain)
+        ipt6('-F', mark_chain)
+        ipt6('-X', mark_chain)
+
+    if ipt_chain_exists(tproxy_chain, ipv6):
+        ipt6('-D', 'PREROUTING', '-j', tproxy_chain)
+        ipt6('-F', tproxy_chain)
+        ipt6('-X', tproxy_chain)
+
+    if subnets or dnsport:
+        ipt6('-N', mark_chain)
+        ipt6('-F', mark_chain)
+        ipt6('-N', tproxy_chain)
+        ipt6('-F', tproxy_chain)
+        ipt6('-I', 'OUTPUT', '1', '-j', mark_chain)
+        ipt6('-I', 'PREROUTING', '1', '-j', tproxy_chain)
+        ipt6('-A', tproxy_chain, '-m', 'socket', '-j', 'RETURN',
+             '-m', 'tcp', '-p', 'tcp')
+
+    #ipt6('-A', mark_chain, '-o', 'lo', '-j', 'RETURN')
+ 
+    if subnets:
+        for swidth,sexclude,snet in sorted(subnets, reverse=True):
+            if sexclude:
+                ipt6('-A', mark_chain, '-j', 'RETURN',
+                    '--dest', '%s/%s' % (snet,swidth),
+                    '-m', 'tcp', '-p', 'tcp')
+                ipt6('-A', tproxy_chain, '-j', 'RETURN',
+                    '--dest', '%s/%s' % (snet,swidth),
+                    '-m', 'tcp', '-p', 'tcp')
+            else:
+                ipt6('-A', mark_chain, '-j', 'MARK', '--set-mark', '1',
+                     '--dest', '%s/%s' % (snet,swidth),
+                     '-m', 'tcp', '-p', 'tcp')
+                ipt6('-A', tproxy_chain, '-j', 'TPROXY', '--tproxy-mark', '0x1/0x1',
+                     '--dest', '%s/%s' % (snet,swidth),
+                     '-m', 'tcp', '-p', 'tcp',
+                     '--on-port', str(port))
+                
 
 def ipfw_rule_exists(n):
     argv = ['ipfw', 'list']
@@ -207,7 +265,7 @@ def ipfw(*args):
         raise Fatal('%r returned %d' % (argv, rv))
 
 
-def do_ipfw(port, dnsport, subnets):
+def do_ipfw(port, dnsport, ipv6, subnets):
     sport = str(port)
     xsport = str(port+1)
 
@@ -369,7 +427,7 @@ def restore_etc_hosts(port):
 # exit.  In case that fails, it's not the end of the world; future runs will
 # supercede it in the transproxy list, at least, so the leftover rules
 # are hopefully harmless.
-def main(port, dnsport, syslog):
+def main(port, dnsport, ipv6, syslog):
     assert(port > 0)
     assert(port <= 65535)
     assert(dnsport >= 0)
@@ -381,7 +439,10 @@ def main(port, dnsport, syslog):
     if program_exists('ipfw'):
         do_it = do_ipfw
     elif program_exists('iptables'):
-        do_it = do_iptables
+        if ipv6:
+            do_it = do_ip6tables
+        else:
+            do_it = do_iptables
     else:
         raise Fatal("can't find either ipfw or iptables; check your PATH")
 
@@ -427,7 +488,7 @@ def main(port, dnsport, syslog):
     try:
         if line:
             debug1('firewall manager: starting transproxy.\n')
-            do_wait = do_it(port, dnsport, subnets)
+            do_wait = do_it(port, dnsport, ipv6, subnets)
             sys.stdout.write('STARTED\n')
         
         try:
@@ -456,5 +517,5 @@ def main(port, dnsport, syslog):
             debug1('firewall manager: undoing changes.\n')
         except:
             pass
-        do_it(port, 0, [])
+        do_it(port, 0, ipv6, [])
         restore_etc_hosts(port)
