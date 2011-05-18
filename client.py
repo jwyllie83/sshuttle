@@ -97,17 +97,67 @@ def original_dst(sock):
         raise
 
 
+class independent_listener:
+
+    def __init__(self, type=socket.SOCK_STREAM, proto=0):
+        self.v6 = socket.socket(socket.AF_INET6, type, proto)
+        self.v4 = socket.socket(socket.AF_INET, type, proto)
+
+    def setsockopt(self, level, optname, value):
+        if self.v6:
+            self.v6.setsockopt(level, optname, value)
+        if self.v4:
+            self.v4.setsockopt(level, optname, value)
+
+    def add_handler(self, handlers, handler):
+        if self.v6:
+            handlers.append(Handler([self.v6], lambda: handler(self.v6)))
+        if self.v4:
+            handlers.append(Handler([self.v4], lambda: handler(self.v4)))
+
+    def listen(self, backlog):
+        if self.v6:
+            self.v6.listen(backlog)
+        if self.v4:
+            try:
+                self.v4.listen(backlog)
+            except socket.error, e:
+                # on some systems v4 bind will fail if the v6 suceeded,
+                # in this case the v6 socket will receive v4 too.
+                if e.errno == errno.EADDRINUSE and self.v6:
+                    self.v4 = None
+                else:
+                    raise e
+
+    def bind(self, address_v4, address_v6):
+        if address_v6 and self.v6:
+            self.v6.bind(address_v6)
+        else:
+            self.v6 = None
+        if address_v4 and self.v4:
+            self.v4.bind(address_v4)
+        else:
+            self.v4 = None
+
+    def print_listening(self, what):
+        if self.v6:
+            listenip = self.v6.getsockname()
+            debug1('%s listening on %r.\n' % (what, listenip, ))
+        if self.v4:
+            listenip = self.v4.getsockname()
+            debug1('%s listening on %r.\n' % (what, listenip, ))
+
 class FirewallClient:
-    def __init__(self, port, subnets_include, subnets_exclude, dnsport, ipv6):
+    def __init__(self, port, subnets_include, subnets_exclude, dnsport, tproxy):
         self.port = port
         self.auto_nets = []
         self.subnets_include = subnets_include
         self.subnets_exclude = subnets_exclude
         self.dnsport = dnsport
-        self.ipv6 = ipv6
+        self.tproxy = tproxy
         argvbase = ([sys.argv[1], sys.argv[0], sys.argv[1]] +
                     ['-v'] * (helpers.verbose or 0) +
-                    ['--firewall', str(port), str(dnsport), str(ipv6 or '0')])
+                    ['--firewall', str(port), str(dnsport), str(tproxy or 0)])
         if ssyslog._p:
             argvbase += ['--syslog']
         argv_tries = [
@@ -154,10 +204,10 @@ class FirewallClient:
 
     def start(self):
         self.pfile.write('ROUTES\n')
-        for (ip,width) in self.subnets_include+self.auto_nets:
-            self.pfile.write('%d,0,%s\n' % (width, ip))
-        for (ip,width) in self.subnets_exclude:
-            self.pfile.write('%d,1,%s\n' % (width, ip))
+        for (family,ip,width) in self.subnets_include+self.auto_nets:
+            self.pfile.write('%d,%d,0,%s\n' % (family, width, ip))
+        for (family,ip,width) in self.subnets_exclude:
+            self.pfile.write('%d,%d,1,%s\n' % (family, width, ip))
         self.pfile.write('GO\n')
         self.pfile.flush()
         line = self.pfile.readline()
@@ -179,7 +229,7 @@ class FirewallClient:
 
 
 def _main(listener, fw, ssh_cmd, remotename, python, latency_control,
-          dnslistener, ipv6, seed_hosts, auto_nets,
+          dnslistener, tproxy, seed_hosts, auto_nets,
           syslog, daemon):
     handlers = []
     if helpers.verbose >= 1:
@@ -191,7 +241,7 @@ def _main(listener, fw, ssh_cmd, remotename, python, latency_control,
     try:
         (serverproc, serversock) = ssh.connect(ssh_cmd, remotename, python,
                         stderr=ssyslog._p and ssyslog._p.stdin,
-                        options=dict(latency_control=latency_control, ipv6=ipv6))
+                        options=dict(latency_control=latency_control, tproxy=tproxy))
     except socket.error, e:
         if e.args[0] == errno.EPIPE:
             raise Fatal("failed to establish ssh session (1)")
@@ -258,30 +308,30 @@ def _main(listener, fw, ssh_cmd, remotename, python, latency_control,
                 fw.sethostip(name, ip)
     mux.got_host_list = onhostlist
 
-    def onaccept():
+    def onaccept(listener_sock):
         global _extra_fd
         try:
-            sock,srcip = listener.accept()
+            sock,srcip = listener_sock.accept()
         except socket.error, e:
             if e.args[0] in [errno.EMFILE, errno.ENFILE]:
                 debug1('Rejected incoming connection: too many open files!\n')
                 # free up an fd so we can eat the connection
                 os.close(_extra_fd)
                 try:
-                    sock,srcip = listener.accept()
+                    sock,srcip = listener_sock.accept()
                     sock.close()
                 finally:
                     _extra_fd = os.open('/dev/null', os.O_RDONLY)
                 return
             else:
                 raise
-        if ipv6:
+        if tproxy:
             dstip = sock.getsockname();
         else:
             dstip = original_dst(sock)
         debug1('Accept: %s:%r -> %s:%r.\n' % (srcip[0],srcip[1],
                                               dstip[0],dstip[1]))
-        if dstip[1] == listener.getsockname()[1] and islocal(dstip[0]):
+        if dstip[1] == sock.getsockname()[1] and islocal(dstip[0]):
             debug1("-- ignored: that's my address!\n")
             sock.close()
             return
@@ -293,23 +343,23 @@ def _main(listener, fw, ssh_cmd, remotename, python, latency_control,
         mux.send(chan, ssnet.CMD_CONNECT, '%s,%r' % (dstip[0], dstip[1]))
         outwrap = MuxWrapper(mux, chan)
         handlers.append(Proxy(SockWrapper(sock, sock), outwrap))
-    handlers.append(Handler([listener], onaccept))
+    listener.add_handler(handlers, onaccept)
 
     dnsreqs = {}
     def dns_done(chan, data):
-        peer,timeout = dnsreqs.get(chan) or (None,None)
+        peer,sock,timeout = dnsreqs.get(chan) or (None,None)
         debug3('dns_done: channel=%r peer=%r\n' % (chan, peer))
         if peer:
             del dnsreqs[chan]
             debug3('doing sendto %r\n' % (peer,))
-            dnslistener.sendto(data, peer)
-    def ondns():
-        pkt,peer = dnslistener.recvfrom(4096)
+            sock.sendto(data, peer)
+    def ondns(listener_sock):
+        pkt,peer = listener_sock.recvfrom(4096)
         now = time.time()
         if pkt:
             debug1('DNS request from %r: %d bytes\n' % (peer, len(pkt)))
             chan = mux.next_channel()
-            dnsreqs[chan] = peer,now+30
+            dnsreqs[chan] = peer,listener_sock,now+30
             mux.send(chan, ssnet.CMD_DNS_REQ, pkt)
             mux.channels[chan] = lambda cmd,data: dns_done(chan,data)
         for chan,(peer,timeout) in dnsreqs.items():
@@ -317,7 +367,7 @@ def _main(listener, fw, ssh_cmd, remotename, python, latency_control,
                 del dnsreqs[chan]
         debug3('Remaining DNS requests: %d\n' % len(dnsreqs))
     if dnslistener:
-        handlers.append(Handler([dnslistener], ondns))
+        dnslistener.add_handler(handlers, ondsn)
 
     if seed_hosts != None:
         debug1('seed_hosts: %r\n' % seed_hosts)
@@ -334,8 +384,9 @@ def _main(listener, fw, ssh_cmd, remotename, python, latency_control,
         mux.callback()
 
 
-def main(listenip, ssh_cmd, remotename, python, latency_control, dns,
-         ipv6, seed_hosts, auto_nets,
+def main(listenip_v6, listenip_v4,
+         ssh_cmd, remotename, python, latency_control, dns,
+         tproxy, seed_hosts, auto_nets,
          subnets_include, subnets_exclude, syslog, daemon, pidfile):
     if syslog:
         ssyslog.start_syslog()
@@ -347,58 +398,70 @@ def main(listenip, ssh_cmd, remotename, python, latency_control, dns,
             return 5
     debug1('Starting sshuttle proxy.\n')
     
-    if listenip[1]:
+    if listenip_v4[1]:
         ports = [listenip[1]]
     else:
         ports = xrange(12300,9000,-1)
     last_e = None
+    redirectport = None
     bound = False
     debug2('Binding:')
     for port in ports:
         debug2(' %d' % port)
-        if ipv6:
-            listener = socket.socket(socket.AF_INET6)
-        else:
-            listener = socket.socket(socket.AF_INET)
+        listener = independent_listener()
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
+
+        if tproxy:
             listener.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
-        except socket.error, e:
-            last_e = e
-        if ipv6:
-            dnslistener = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-        else:
-            dnslistener = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+        dnslistener = independent_listener(socket.SOCK_DGRAM)
         dnslistener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            listener.bind((listenip[0], port))
-            dnslistener.bind((listenip[0], port))
+            if listenip_v6:
+                lv6 = (listenip_v6[0],port)
+            else:
+                lv6 = None
+            if listenip_v4:
+                lv4 = (listenip_v4[0],port)
+            else:
+                lv4 = None
+            listener.bind(lv4, lv6)
+            dnslistener.bind(lv4, lv6)
+            redirectport = port
             bound = True
             break
+        except Fatal, e:
+            raise e
         except socket.error, e:
-            last_e = e
+            if e.errno == errno.EADDRNOTAVAIL:
+                last_e = e
+            else:
+                raise e
     debug2('\n')
     if not bound:
         assert(last_e)
         raise last_e
     listener.listen(10)
-    listenip = listener.getsockname()
-    debug1('Listening on %r.\n' % (listenip,))
+    listener.print_listening("Redirector")
 
     if dns:
-        dnsip = dnslistener.getsockname()
-        debug1('DNS listening on %r.\n' % (dnsip,))
-        dnsport = dnsip[1]
+        dnslistener.print_listening("DNS")
+        if dnslistener.v6:
+            dnsip = dnslistener.v6.getsockname()
+            dnsport = dnsip[1]
+        else:
+            dnsip = dnslistener.v4.getsockname()
+            dnsport = dnsip[1]
     else:
         dnsport = 0
         dnslistener = None
 
-    fw = FirewallClient(listenip[1], subnets_include, subnets_exclude, dnsport, ipv6)
+    fw = FirewallClient(redirectport, subnets_include, subnets_exclude, dnsport, tproxy)
     
     try:
         return _main(listener, fw, ssh_cmd, remotename,
                      python, latency_control, dnslistener,
-                     ipv6, seed_hosts, auto_nets, syslog, 
+                     tproxy, seed_hosts, auto_nets, syslog, 
                      daemon)
     finally:
         try:

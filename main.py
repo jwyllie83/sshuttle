@@ -1,50 +1,53 @@
-import sys, os, re
+import sys, os, re, socket
 import helpers, options, client, server, firewall, hostwatch
 import compat.ssubprocess as ssubprocess
 from helpers import *
 
 
+def parse_subnet4(s):
+    m = re.match(r'(\d+)(?:\.(\d+)\.(\d+)\.(\d+))?(?:/(\d+))?$', s)
+    if not m:
+        raise Fatal('%r is not a valid IP subnet format' % s)
+    (a,b,c,d,width) = m.groups()
+    (a,b,c,d) = (int(a or 0), int(b or 0), int(c or 0), int(d or 0))
+    if width == None:
+        width = 32
+    else:
+        width = int(width)
+    if a > 255 or b > 255 or c > 255 or d > 255:
+        raise Fatal('%d.%d.%d.%d has numbers > 255' % (a,b,c,d))
+    if width > 32:
+        raise Fatal('*/%d is greater than the maximum of 32' % width)
+    return(socket.AF_INET, '%d.%d.%d.%d' % (a,b,c,d), width)
+
+def parse_subnet6(s):
+    m = re.match(r'(?:([a-fA-F\d:]+))?(?:/(\d+))?$', s)
+    if not m:
+        raise Fatal('%r is not a valid IP subnet format' % s)
+    (net,width) = m.groups()
+    if width == None:
+        width = 128
+    else:
+        width = int(width)
+    if width > 128:
+        raise Fatal('*/%d is greater than the maximum of 128' % width)
+    return(socket.AF_INET6, net, width)
+
 # list of:
 # 1.2.3.4/5 or just 1.2.3.4
+# 1:2::3/64 or just 1:2::3
 def parse_subnets(subnets_str):
     subnets = []
     for s in subnets_str:
-        m = re.match(r'(\d+)(?:\.(\d+)\.(\d+)\.(\d+))?(?:/(\d+))?$', s)
-        if not m:
-            raise Fatal('%r is not a valid IP subnet format' % s)
-        (a,b,c,d,width) = m.groups()
-        (a,b,c,d) = (int(a or 0), int(b or 0), int(c or 0), int(d or 0))
-        if width == None:
-            width = 32
+        if ':' in s:
+            subnet = parse_subnet6(s)
         else:
-            width = int(width)
-        if a > 255 or b > 255 or c > 255 or d > 255:
-            raise Fatal('%d.%d.%d.%d has numbers > 255' % (a,b,c,d))
-        if width > 32:
-            raise Fatal('*/%d is greater than the maximum of 32' % width)
-        subnets.append(('%d.%d.%d.%d' % (a,b,c,d), width))
-    return subnets
-
-# list of:
-# 1:2::3/64 or just 1:2::3
-def parse_subnets6(subnets_str):
-    subnets = []
-    for s in subnets_str:
-        m = re.match(r'(?:([a-fA-F\d:]+))?(?:/(\d+))?$', s)
-        if not m:
-            raise Fatal('%r is not a valid IP subnet format' % s)
-        (net,width) = m.groups()
-        if width == None:
-            width = 128
-        else:
-            width = int(width)
-        if width > 128:
-            raise Fatal('*/%d is greater than the maximum of 128' % width)
-        subnets.append((net, width))
+            subnet = parse_subnet4(s)
+        subnets.append(subnet)
     return subnets
 
 # 1.2.3.4:567 or just 1.2.3.4 or just 567
-def parse_ipport(s):
+def parse_ipport4(s):
     s = str(s)
     m = re.match(r'(?:(\d+)\.(\d+)\.(\d+)\.(\d+))?(?::)?(?:(\d+))?$', s)
     if not m:
@@ -81,7 +84,7 @@ l,listen=  transproxy to this ip address and port number
 H,auto-hosts scan for remote hostnames and update local /etc/hosts
 N,auto-nets  automatically determine subnets to route
 dns        capture local DNS requests and forward to the remote DNS server
-6,ipv6     mode for dealing with IPv6
+tproxy     tproxy support
 python=    path to python interpreter on the remote server
 r,remote=  ssh hostname (and optional username) of remote sshuttle server
 x,exclude= exclude this subnet (can be used more than once)
@@ -112,7 +115,7 @@ try:
         if len(extra) != 0:
             o.fatal('no arguments expected')
         server.latency_control = opt.latency_control
-        server.ipv6 = opt.ipv6
+        server.tproxy = opt.tproxy
         sys.exit(server.main())
     elif opt.firewall:
         if len(extra) != 3:
@@ -125,10 +128,7 @@ try:
         if len(extra) < 1 and not opt.auto_nets:
             o.fatal('at least one subnet (or -N) expected')
         includes = extra
-        if not opt.ipv6:
-            excludes = ['127.0.0.0/8']
-        else:
-            excludes = [] #FIXME
+        excludes = ['127.0.0.0/8']
         for k,v in flags:
             if k in ('-x','--exclude'):
                 excludes.append(v)
@@ -143,23 +143,26 @@ try:
             sh = []
         else:
             sh = None
-        if opt.ipv6:
-            ipport = parse_ipport6(opt.listen or '[::]:0')
-            do_parse_subnets = parse_subnets6
+        if not opt.listen:
+            ipport_v6 = parse_ipport6('[::]:0')
+            ipport_v4 = parse_ipport4('127.0.0.1:0')
+        elif ':' in opt.listen:
+            ipport_v6 = parse_ipport6(opt.listen or '[::]:0')
+            ipport_v4 = None
         else:
-            ipport = parse_ipport(opt.listen or '127.0.0.1:0')
-            do_parse_subnets = parse_subnets
-        sys.exit(client.main(ipport,
+            ipport_v6 = None
+            ipport_v4 = parse_ipport4(opt.listen or '127.0.0.1:0')
+        sys.exit(client.main(ipport_v6, ipport_v4,
                              opt.ssh_cmd,
                              remotename,
                              opt.python,
                              opt.latency_control,
                              opt.dns,
-                             opt.ipv6,
+                             opt.tproxy,
                              sh,
                              opt.auto_nets,
-                             do_parse_subnets(includes),
-                             do_parse_subnets(excludes),
+                             parse_subnets(includes),
+                             parse_subnets(excludes),
                              opt.syslog, opt.daemon, opt.pidfile))
 except Fatal, e:
     log('fatal: %s\n' % e)

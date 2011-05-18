@@ -14,13 +14,15 @@ def nonfatal(func, *args):
         log('error: %s\n' % e)
 
 
-def ipt_chain_exists(name, ipv6):
-    if ipv6:
+def ipt_chain_exists(name, family):
+    if family == socket.AF_INET6:
         table = 'mangle'
         cmd = 'ip6tables'
-    else:
+    elif family == socket.AF_INET:
         table = 'nat'
         cmd = 'iptables'
+    else:
+        raise Fatal("Unsupported socket type '%s'"%family)
     argv = [cmd, '-t', table, '-nL']
     p = ssubprocess.Popen(argv, stdout = ssubprocess.PIPE)
     for line in p.stdout:
@@ -31,7 +33,7 @@ def ipt_chain_exists(name, ipv6):
         raise Fatal('%r returned %d' % (argv, rv))
 
 
-def ipt(*args):
+def ipt4(*args):
     argv = ['iptables', '-t', 'nat'] + list(args)
     debug1('>> %s\n' % ' '.join(argv))
     rv = ssubprocess.call(argv)
@@ -45,9 +47,17 @@ def ipt6(*args):
     if rv:
         raise Fatal('%r returned %d' % (argv, rv))
 
+def ipt(family, *args):
+    if family == socket.AF_INET6:
+        ipt6(*args)
+    elif family == socket.AF_INET:
+        ipt4(*args)
+    else:
+        raise Fatal("Unsupported socket type '%s'"%family)
+    
 
 _no_ttl_module = False
-def ipt_ttl(*args):
+def ipt_ttl(family, *args):
     global _no_ttl_module
     if not _no_ttl_module:
         # we avoid infinite loops by generating server-side connections
@@ -55,15 +65,15 @@ def ipt_ttl(*args):
         # connections, in case client == server.
         try:
             argsplus = list(args) + ['-m', 'ttl', '!', '--ttl', '42']
-            ipt(*argsplus)
+            ipt(family, *argsplus)
         except Fatal:
-            ipt(*args)
+            ipt(family, *args)
             # we only get here if the non-ttl attempt succeeds
             log('sshuttle: warning: your iptables is missing '
                 'the ttl module.\n')
             _no_ttl_module = True
     else:
-        ipt(*args)
+        ipt(family, *args)
 
 
 
@@ -72,21 +82,25 @@ def ipt_ttl(*args):
 # multiple copies shouldn't have overlapping subnets, or only the most-
 # recently-started one will win (because we use "-I OUTPUT 1" instead of
 # "-A OUTPUT").
-def do_iptables(port, dnsport, ipv6, subnets):
+def do_iptables_nat(port, dnsport, family, subnets):
+    # only ipv4 supported with NAT
+    if family != socket.AF_INET:
+        return
+
     chain = 'sshuttle-%s' % port
 
     # basic cleanup/setup of chains
-    if ipt_chain_exists(chain, ipv6):
-        nonfatal(ipt, '-D', 'OUTPUT', '-j', chain)
-        nonfatal(ipt, '-D', 'PREROUTING', '-j', chain)
-        nonfatal(ipt, '-F', chain)
-        ipt('-X', chain)
+    if ipt_chain_exists(chain, family):
+        nonfatal(ipt, family, '-D', 'OUTPUT', '-j', chain)
+        nonfatal(ipt, family, '-D', 'PREROUTING', '-j', chain)
+        nonfatal(ipt, family, '-F', chain)
+        ipt(family, '-X', chain)
 
     if subnets or dnsport:
-        ipt('-N', chain)
-        ipt('-F', chain)
-        ipt('-I', 'OUTPUT', '1', '-j', chain)
-        ipt('-I', 'PREROUTING', '1', '-j', chain)
+        ipt(family, '-N', chain)
+        ipt(family, '-F', chain)
+        ipt(family, '-I', 'OUTPUT', '1', '-j', chain)
+        ipt(family, '-I', 'PREROUTING', '1', '-j', chain)
 
     if subnets:
         # create new subnet entries.  Note that we're sorting in a very
@@ -94,13 +108,15 @@ def do_iptables(port, dnsport, ipv6, subnets):
         # to least-specific, and at any given level of specificity, we want
         # excludes to come first.  That's why the columns are in such a non-
         # intuitive order.
-        for swidth,sexclude,snet in sorted(subnets, reverse=True):
-            if sexclude:
-                ipt('-A', chain, '-j', 'RETURN',
+        for f,swidth,sexclude,snet in sorted(subnets, reverse=True):
+            if f != family:
+                pass
+            elif sexclude:
+                ipt(family, '-A', chain, '-j', 'RETURN',
                     '--dest', '%s/%s' % (snet,swidth),
                     '-p', 'tcp')
             else:
-                ipt_ttl('-A', chain, '-j', 'REDIRECT',
+                ipt_ttl(family, '-A', chain, '-j', 'REDIRECT',
                         '--dest', '%s/%s' % (snet,swidth),
                         '-p', 'tcp',
                         '--to-ports', str(port))
@@ -108,53 +124,58 @@ def do_iptables(port, dnsport, ipv6, subnets):
     if dnsport:
         nslist = resolvconf_nameservers()
         for ip in nslist:
-            ipt_ttl('-A', chain, '-j', 'REDIRECT',
+            ipt_ttl(family, '-A', chain, '-j', 'REDIRECT',
                     '--dest', '%s/32' % ip,
                     '-p', 'udp',
                     '--dport', '53',
                     '--to-ports', str(dnsport))
 
-def do_ip6tables(port, dnsport, ipv6, subnets):
+def do_ip6tables_tproxy(port, dnsport, family, subnets):
+    if family not in [socket.AF_INET, socket.AF_INET6]:
+        return
+
     mark_chain   = 'sshuttle-m-%s' % port
     tproxy_chain = 'sshuttle-t-%s' % port
 
     # basic cleanup/setup of chains
-    if ipt_chain_exists(mark_chain, ipv6):
-        ipt6('-D', 'OUTPUT', '-j', mark_chain)
-        ipt6('-F', mark_chain)
-        ipt6('-X', mark_chain)
+    if ipt_chain_exists(mark_chain, family):
+        ipt(family, '-D', 'OUTPUT', '-j', mark_chain)
+        ipt(family, '-F', mark_chain)
+        ipt(family, '-X', mark_chain)
 
-    if ipt_chain_exists(tproxy_chain, ipv6):
-        ipt6('-D', 'PREROUTING', '-j', tproxy_chain)
-        ipt6('-F', tproxy_chain)
-        ipt6('-X', tproxy_chain)
+    if ipt_chain_exists(tproxy_chain, family):
+        ipt(family, '-D', 'PREROUTING', '-j', tproxy_chain)
+        ipt(family, '-F', tproxy_chain)
+        ipt(family, '-X', tproxy_chain)
 
     if subnets or dnsport:
-        ipt6('-N', mark_chain)
-        ipt6('-F', mark_chain)
-        ipt6('-N', tproxy_chain)
-        ipt6('-F', tproxy_chain)
-        ipt6('-I', 'OUTPUT', '1', '-j', mark_chain)
-        ipt6('-I', 'PREROUTING', '1', '-j', tproxy_chain)
-        ipt6('-A', tproxy_chain, '-m', 'socket', '-j', 'RETURN',
+        ipt(family, '-N', mark_chain)
+        ipt(family, '-F', mark_chain)
+        ipt(family, '-N', tproxy_chain)
+        ipt(family, '-F', tproxy_chain)
+        ipt(family, '-I', 'OUTPUT', '1', '-j', mark_chain)
+        ipt(family, '-I', 'PREROUTING', '1', '-j', tproxy_chain)
+        ipt(family, '-A', tproxy_chain, '-m', 'socket', '-j', 'RETURN',
              '-m', 'tcp', '-p', 'tcp')
 
-    #ipt6('-A', mark_chain, '-o', 'lo', '-j', 'RETURN')
+    #ipt(family, '-A', mark_chain, '-o', 'lo', '-j', 'RETURN')
  
     if subnets:
-        for swidth,sexclude,snet in sorted(subnets, reverse=True):
-            if sexclude:
-                ipt6('-A', mark_chain, '-j', 'RETURN',
+        for f,swidth,sexclude,snet in sorted(subnets, reverse=True):
+            if f != family:
+                pass
+            elif sexclude:
+                ipt(family, '-A', mark_chain, '-j', 'RETURN',
                     '--dest', '%s/%s' % (snet,swidth),
                     '-m', 'tcp', '-p', 'tcp')
-                ipt6('-A', tproxy_chain, '-j', 'RETURN',
+                ipt(family, '-A', tproxy_chain, '-j', 'RETURN',
                     '--dest', '%s/%s' % (snet,swidth),
                     '-m', 'tcp', '-p', 'tcp')
             else:
-                ipt6('-A', mark_chain, '-j', 'MARK', '--set-mark', '1',
+                ipt(family, '-A', mark_chain, '-j', 'MARK', '--set-mark', '1',
                      '--dest', '%s/%s' % (snet,swidth),
                      '-m', 'tcp', '-p', 'tcp')
-                ipt6('-A', tproxy_chain, '-j', 'TPROXY', '--tproxy-mark', '0x1/0x1',
+                ipt(family, '-A', tproxy_chain, '-j', 'TPROXY', '--tproxy-mark', '0x1/0x1',
                      '--dest', '%s/%s' % (snet,swidth),
                      '-m', 'tcp', '-p', 'tcp',
                      '--on-port', str(port))
@@ -265,7 +286,11 @@ def ipfw(*args):
         raise Fatal('%r returned %d' % (argv, rv))
 
 
-def do_ipfw(port, dnsport, ipv6, subnets):
+def do_ipfw(port, dnsport, family, subnets):
+    # IPv6 support TODO
+    if family != socket.AF_INET:
+        return
+
     sport = str(port)
     xsport = str(port+1)
 
@@ -427,7 +452,7 @@ def restore_etc_hosts(port):
 # exit.  In case that fails, it's not the end of the world; future runs will
 # supercede it in the transproxy list, at least, so the leftover rules
 # are hopefully harmless.
-def main(port, dnsport, ipv6, syslog):
+def main(port, dnsport, tproxy, syslog):
     assert(port > 0)
     assert(port <= 65535)
     assert(dnsport >= 0)
@@ -439,10 +464,10 @@ def main(port, dnsport, ipv6, syslog):
     if program_exists('ipfw'):
         do_it = do_ipfw
     elif program_exists('iptables'):
-        if ipv6:
-            do_it = do_ip6tables
+        if tproxy:
+            do_it = do_ip6tables_tproxy
         else:
-            do_it = do_iptables
+            do_it = do_iptables_nat
     else:
         raise Fatal("can't find either ipfw or iptables; check your PATH")
 
@@ -480,15 +505,16 @@ def main(port, dnsport, ipv6, syslog):
         elif line == 'GO\n':
             break
         try:
-            (width,exclude,ip) = line.strip().split(',', 2)
+            (family,width,exclude,ip) = line.strip().split(',', 3)
         except:
             raise Fatal('firewall: expected route or GO but got %r' % line)
-        subnets.append((int(width), bool(int(exclude)), ip))
+        subnets.append((int(family), int(width), bool(int(exclude)), ip))
         
     try:
         if line:
             debug1('firewall manager: starting transproxy.\n')
-            do_wait = do_it(port, dnsport, ipv6, subnets)
+            do_wait = do_it(port, dnsport, socket.AF_INET6, subnets)
+            do_wait = do_it(port, dnsport, socket.AF_INET, subnets)
             sys.stdout.write('STARTED\n')
         
         try:
@@ -517,5 +543,6 @@ def main(port, dnsport, ipv6, syslog):
             debug1('firewall manager: undoing changes.\n')
         except:
             pass
-        do_it(port, 0, ipv6, [])
+        do_it(port, 0, socket.AF_INET6, [])
+        do_it(port, 0, socket.AF_INET, [])
         restore_etc_hosts(port)
