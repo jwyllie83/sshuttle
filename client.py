@@ -331,7 +331,7 @@ def _main(listener, fw, ssh_cmd, remotename, python, latency_control,
             dstip = original_dst(sock)
         debug1('Accept: %s:%r -> %s:%r.\n' % (srcip[0],srcip[1],
                                               dstip[0],dstip[1]))
-        if dstip[1] == sock.getsockname()[1] and islocal(dstip[0]):
+        if dstip[1] == sock.getsockname()[1] and islocal(dstip[0],sock.family):
             debug1("-- ignored: that's my address!\n")
             sock.close()
             return

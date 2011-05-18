@@ -58,8 +58,8 @@ def resolvconf_random_nameserver():
         return '127.0.0.1'
     
 
-def islocal(ip):
-    sock = socket.socket()
+def islocal(ip,family):
+    sock = socket.socket(family)
     try:
         try:
             sock.bind((ip, 0))
