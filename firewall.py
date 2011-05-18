@@ -14,12 +14,10 @@ def nonfatal(func, *args):
         log('error: %s\n' % e)
 
 
-def ipt_chain_exists(name, family):
+def ipt_table_exists(name, family, table):
     if family == socket.AF_INET6:
-        table = 'mangle'
         cmd = 'ip6tables'
     elif family == socket.AF_INET:
-        table = 'nat'
         cmd = 'iptables'
     else:
         raise Fatal("Unsupported socket type '%s'"%family)
@@ -91,7 +89,7 @@ def do_iptables_nat(port, dnsport, family, subnets):
     chain = 'sshuttle-%s' % port
 
     # basic cleanup/setup of chains
-    if ipt_chain_exists(chain, family):
+    if ipt_table_exists(chain, family, table):
         nonfatal(ipt, family, table, '-D', 'OUTPUT', '-j', chain)
         nonfatal(ipt, family, table, '-D', 'PREROUTING', '-j', chain)
         nonfatal(ipt, family, table, '-F', chain)
@@ -131,7 +129,7 @@ def do_iptables_nat(port, dnsport, family, subnets):
                     '--dport', '53',
                     '--to-ports', str(dnsport))
 
-def do_ip6tables_tproxy(port, dnsport, family, subnets):
+def do_iptables_tproxy(port, dnsport, family, subnets):
     if family not in [socket.AF_INET, socket.AF_INET6]:
         return
 
@@ -140,12 +138,12 @@ def do_ip6tables_tproxy(port, dnsport, family, subnets):
     tproxy_chain = 'sshuttle-t-%s' % port
 
     # basic cleanup/setup of chains
-    if ipt_chain_exists(mark_chain, family):
+    if ipt_table_exists(mark_chain, family, table):
         ipt(family, table, '-D', 'OUTPUT', '-j', mark_chain)
         ipt(family, table, '-F', mark_chain)
         ipt(family, table, '-X', mark_chain)
 
-    if ipt_chain_exists(tproxy_chain, family):
+    if ipt_table_exists(tproxy_chain, family, table):
         ipt(family, table, '-D', 'PREROUTING', '-j', tproxy_chain)
         ipt(family, table, '-F', tproxy_chain)
         ipt(family, table, '-X', tproxy_chain)
@@ -467,7 +465,7 @@ def main(port, dnsport, tproxy, syslog):
         do_it = do_ipfw
     elif program_exists('iptables'):
         if tproxy:
-            do_it = do_ip6tables_tproxy
+            do_it = do_iptables_tproxy
         else:
             do_it = do_iptables_nat
     else:
