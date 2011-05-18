@@ -107,7 +107,7 @@ def do_iptables_nat(port, dnsport, family, subnets):
         # to least-specific, and at any given level of specificity, we want
         # excludes to come first.  That's why the columns are in such a non-
         # intuitive order.
-        for f,swidth,sexclude,snet in sorted(subnets, reverse=True):
+        for f,swidth,sexclude,snet in sorted(subnets, key=lambda s: s[2], reverse=True):
             if f != family:
                 pass
             elif sexclude:
@@ -161,7 +161,7 @@ def do_iptables_tproxy(port, dnsport, family, subnets):
     #ipt(family, table, '-A', mark_chain, '-o', 'lo', '-j', 'RETURN')
  
     if subnets:
-        for f,swidth,sexclude,snet in sorted(subnets, reverse=True):
+        for f,swidth,sexclude,snet in sorted(subnets, key=lambda s: s[2], reverse=True):
             if f != family:
                 pass
             elif sexclude:
@@ -323,7 +323,7 @@ def do_ipfw(port, dnsport, family, subnets):
 
     if subnets:
         # create new subnet entries
-        for swidth,sexclude,snet in sorted(subnets, reverse=True):
+        for f,swidth,sexclude,snet in sorted(subnets, key=lambda s: s[2], reverse=True):
             if sexclude:
                 ipfw('add', sport, 'skipto', xsport,
                      'log', 'tcp',
