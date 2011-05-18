@@ -33,15 +33,15 @@ def ipt_chain_exists(name, family):
         raise Fatal('%r returned %d' % (argv, rv))
 
 
-def ipt4(*args):
-    argv = ['iptables', '-t', 'nat'] + list(args)
+def ipt4(table, *args):
+    argv = ['iptables', '-t', table] + list(args)
     debug1('>> %s\n' % ' '.join(argv))
     rv = ssubprocess.call(argv)
     if rv:
         raise Fatal('%r returned %d' % (argv, rv))
 
-def ipt6(*args):
-    argv = ['ip6tables', '-t', 'mangle'] + list(args)
+def ipt6(table, *args):
+    argv = ['ip6tables', '-t', table] + list(args)
     debug1('>> %s\n' % ' '.join(argv))
     rv = ssubprocess.call(argv)
     if rv:
@@ -87,20 +87,21 @@ def do_iptables_nat(port, dnsport, family, subnets):
     if family != socket.AF_INET:
         return
 
+    table = "nat"
     chain = 'sshuttle-%s' % port
 
     # basic cleanup/setup of chains
     if ipt_chain_exists(chain, family):
-        nonfatal(ipt, family, '-D', 'OUTPUT', '-j', chain)
-        nonfatal(ipt, family, '-D', 'PREROUTING', '-j', chain)
-        nonfatal(ipt, family, '-F', chain)
-        ipt(family, '-X', chain)
+        nonfatal(ipt, family, table, '-D', 'OUTPUT', '-j', chain)
+        nonfatal(ipt, family, table, '-D', 'PREROUTING', '-j', chain)
+        nonfatal(ipt, family, table, '-F', chain)
+        ipt(family, table, '-X', chain)
 
     if subnets or dnsport:
-        ipt(family, '-N', chain)
-        ipt(family, '-F', chain)
-        ipt(family, '-I', 'OUTPUT', '1', '-j', chain)
-        ipt(family, '-I', 'PREROUTING', '1', '-j', chain)
+        ipt(family, table, '-N', chain)
+        ipt(family, table, '-F', chain)
+        ipt(family, table, '-I', 'OUTPUT', '1', '-j', chain)
+        ipt(family, table, '-I', 'PREROUTING', '1', '-j', chain)
 
     if subnets:
         # create new subnet entries.  Note that we're sorting in a very
@@ -112,11 +113,11 @@ def do_iptables_nat(port, dnsport, family, subnets):
             if f != family:
                 pass
             elif sexclude:
-                ipt(family, '-A', chain, '-j', 'RETURN',
+                ipt(family, table, '-A', chain, '-j', 'RETURN',
                     '--dest', '%s/%s' % (snet,swidth),
                     '-p', 'tcp')
             else:
-                ipt_ttl(family, '-A', chain, '-j', 'REDIRECT',
+                ipt_ttl(family, table, '-A', chain, '-j', 'REDIRECT',
                         '--dest', '%s/%s' % (snet,swidth),
                         '-p', 'tcp',
                         '--to-ports', str(port))
@@ -124,7 +125,7 @@ def do_iptables_nat(port, dnsport, family, subnets):
     if dnsport:
         nslist = resolvconf_nameservers()
         for ip in nslist:
-            ipt_ttl(family, '-A', chain, '-j', 'REDIRECT',
+            ipt_ttl(family, table, '-A', chain, '-j', 'REDIRECT',
                     '--dest', '%s/32' % ip,
                     '-p', 'udp',
                     '--dport', '53',
@@ -134,48 +135,49 @@ def do_ip6tables_tproxy(port, dnsport, family, subnets):
     if family not in [socket.AF_INET, socket.AF_INET6]:
         return
 
+    table = "nat"
     mark_chain   = 'sshuttle-m-%s' % port
     tproxy_chain = 'sshuttle-t-%s' % port
 
     # basic cleanup/setup of chains
     if ipt_chain_exists(mark_chain, family):
-        ipt(family, '-D', 'OUTPUT', '-j', mark_chain)
-        ipt(family, '-F', mark_chain)
-        ipt(family, '-X', mark_chain)
+        ipt(family, table, '-D', 'OUTPUT', '-j', mark_chain)
+        ipt(family, table, '-F', mark_chain)
+        ipt(family, table, '-X', mark_chain)
 
     if ipt_chain_exists(tproxy_chain, family):
-        ipt(family, '-D', 'PREROUTING', '-j', tproxy_chain)
-        ipt(family, '-F', tproxy_chain)
-        ipt(family, '-X', tproxy_chain)
+        ipt(family, table, '-D', 'PREROUTING', '-j', tproxy_chain)
+        ipt(family, table, '-F', tproxy_chain)
+        ipt(family, table, '-X', tproxy_chain)
 
     if subnets or dnsport:
-        ipt(family, '-N', mark_chain)
-        ipt(family, '-F', mark_chain)
-        ipt(family, '-N', tproxy_chain)
-        ipt(family, '-F', tproxy_chain)
-        ipt(family, '-I', 'OUTPUT', '1', '-j', mark_chain)
-        ipt(family, '-I', 'PREROUTING', '1', '-j', tproxy_chain)
-        ipt(family, '-A', tproxy_chain, '-m', 'socket', '-j', 'RETURN',
+        ipt(family, table, '-N', mark_chain)
+        ipt(family, table, '-F', mark_chain)
+        ipt(family, table, '-N', tproxy_chain)
+        ipt(family, table, '-F', tproxy_chain)
+        ipt(family, table, '-I', 'OUTPUT', '1', '-j', mark_chain)
+        ipt(family, table, '-I', 'PREROUTING', '1', '-j', tproxy_chain)
+        ipt(family, table, '-A', tproxy_chain, '-m', 'socket', '-j', 'RETURN',
              '-m', 'tcp', '-p', 'tcp')
 
-    #ipt(family, '-A', mark_chain, '-o', 'lo', '-j', 'RETURN')
+    #ipt(family, table, '-A', mark_chain, '-o', 'lo', '-j', 'RETURN')
  
     if subnets:
         for f,swidth,sexclude,snet in sorted(subnets, reverse=True):
             if f != family:
                 pass
             elif sexclude:
-                ipt(family, '-A', mark_chain, '-j', 'RETURN',
+                ipt(family, table, '-A', mark_chain, '-j', 'RETURN',
                     '--dest', '%s/%s' % (snet,swidth),
                     '-m', 'tcp', '-p', 'tcp')
-                ipt(family, '-A', tproxy_chain, '-j', 'RETURN',
+                ipt(family, table, '-A', tproxy_chain, '-j', 'RETURN',
                     '--dest', '%s/%s' % (snet,swidth),
                     '-m', 'tcp', '-p', 'tcp')
             else:
-                ipt(family, '-A', mark_chain, '-j', 'MARK', '--set-mark', '1',
+                ipt(family, table, '-A', mark_chain, '-j', 'MARK', '--set-mark', '1',
                      '--dest', '%s/%s' % (snet,swidth),
                      '-m', 'tcp', '-p', 'tcp')
-                ipt(family, '-A', tproxy_chain, '-j', 'TPROXY', '--tproxy-mark', '0x1/0x1',
+                ipt(family, table, '-A', tproxy_chain, '-j', 'TPROXY', '--tproxy-mark', '0x1/0x1',
                      '--dest', '%s/%s' % (snet,swidth),
                      '-m', 'tcp', '-p', 'tcp',
                      '--on-port', str(port))
