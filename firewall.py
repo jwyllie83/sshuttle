@@ -135,7 +135,7 @@ def do_ip6tables_tproxy(port, dnsport, family, subnets):
     if family not in [socket.AF_INET, socket.AF_INET6]:
         return
 
-    table = "nat"
+    table = "mangle"
     mark_chain   = 'sshuttle-m-%s' % port
     tproxy_chain = 'sshuttle-t-%s' % port
 
