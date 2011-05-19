@@ -136,6 +136,7 @@ def do_iptables_tproxy(port, dnsport, family, subnets):
     table = "mangle"
     mark_chain   = 'sshuttle-m-%s' % port
     tproxy_chain = 'sshuttle-t-%s' % port
+    divert_chain = 'sshuttle-d-%s' % port
 
     # basic cleanup/setup of chains
     if ipt_chain_exists(family, table, mark_chain):
@@ -148,14 +149,22 @@ def do_iptables_tproxy(port, dnsport, family, subnets):
         ipt(family, table, '-F', tproxy_chain)
         ipt(family, table, '-X', tproxy_chain)
 
+    if ipt_chain_exists(family, table, divert_chain):
+        ipt(family, table, '-F', divert_chain)
+        ipt(family, table, '-X', divert_chain)
+
     if subnets or dnsport:
         ipt(family, table, '-N', mark_chain)
         ipt(family, table, '-F', mark_chain)
+        ipt(family, table, '-N', divert_chain)
+        ipt(family, table, '-F', divert_chain)
         ipt(family, table, '-N', tproxy_chain)
         ipt(family, table, '-F', tproxy_chain)
         ipt(family, table, '-I', 'OUTPUT', '1', '-j', mark_chain)
         ipt(family, table, '-I', 'PREROUTING', '1', '-j', tproxy_chain)
-        ipt(family, table, '-A', tproxy_chain, '-m', 'socket', '-j', 'RETURN',
+        ipt(family, table, '-A', divert_chain, '-j', 'MARK', '--set-mark', '1')
+        ipt(family, table, '-A', divert_chain, '-j', 'ACCEPT')
+        ipt(family, table, '-A', tproxy_chain, '-m', 'socket', '-j', divert_chain,
              '-m', 'tcp', '-p', 'tcp')
 
     #ipt(family, table, '-A', mark_chain, '-o', 'lo', '-j', 'RETURN')
