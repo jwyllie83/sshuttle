@@ -513,10 +513,7 @@ class MuxWrapper(SockWrapper):
 
 def connect_dst(ip, port):
     debug2('Connecting to %s:%d\n' % (ip, port))
-    if ':' in ip:
-        family = socket.AF_INET6
-    else:
-        family = socket.AF_INET
+    family = guess_address_family(ip)
     outsock = socket.socket(family)
     outsock.setsockopt(socket.SOL_IP, socket.IP_TTL, 42)
     return SockWrapper(outsock, outsock,

@@ -73,3 +73,8 @@ def islocal(ip,family):
     return True  # it's a local IP, or there would have been an error
 
 
+def guess_address_family(ip):
+    if ':' in ip:
+        return socket.AF_INET6
+    else:
+        return socket.AF_INET
