@@ -122,7 +122,7 @@ def do_iptables_nat(port, dnsport, family, subnets):
                 
     if dnsport:
         nslist = resolvconf_nameservers()
-        for ip in nslist:
+        for ip in filter(lambda i: guess_address_family(i)==family, nslist):
             ipt_ttl(family, table, '-A', chain, '-j', 'REDIRECT',
                     '--dest', '%s/32' % ip,
                     '-p', 'udp',
