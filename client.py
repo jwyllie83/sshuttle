@@ -228,7 +228,7 @@ class FirewallClient:
             raise Fatal('cleanup: %r returned %d' % (self.argv, rv))
 
 
-def _main(listener, fw, ssh_cmd, remotename, python, latency_control,
+def _main(tcp_listener, fw, ssh_cmd, remotename, python, latency_control,
           dnslistener, tproxy, seed_hosts, auto_nets,
           syslog, daemon):
     handlers = []
@@ -343,7 +343,7 @@ def _main(listener, fw, ssh_cmd, remotename, python, latency_control,
         mux.send(chan, ssnet.CMD_CONNECT, '%s,%r' % (dstip[0], dstip[1]))
         outwrap = MuxWrapper(mux, chan)
         handlers.append(Proxy(SockWrapper(sock, sock), outwrap))
-    listener.add_handler(handlers, onaccept)
+    tcp_listener.add_handler(handlers, onaccept)
 
     dnsreqs = {}
     def dns_done(chan, data):
@@ -405,28 +405,26 @@ def main(listenip_v6, listenip_v4,
     last_e = None
     redirectport = None
     bound = False
-    debug2('Binding:')
+    debug2('Binding redirector:')
     for port in ports:
         debug2(' %d' % port)
-        listener = independent_listener()
-        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        tcp_listener = independent_listener()
+        tcp_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
         if tproxy:
-            listener.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
+            tcp_listener.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
 
-        dnslistener = independent_listener(socket.SOCK_DGRAM)
-        dnslistener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if listenip_v6:
+            lv6 = (listenip_v6[0],port)
+        else:
+            lv6 = None
+        if listenip_v4:
+            lv4 = (listenip_v4[0],port)
+        else:
+            lv4 = None
+
         try:
-            if listenip_v6:
-                lv6 = (listenip_v6[0],port)
-            else:
-                lv6 = None
-            if listenip_v4:
-                lv4 = (listenip_v4[0],port)
-            else:
-                lv4 = None
-            listener.bind(lv4, lv6)
-            dnslistener.bind(lv4, lv6)
+            tcp_listener.bind(lv4, lv6)
             redirectport = port
             bound = True
             break
@@ -441,17 +439,42 @@ def main(listenip_v6, listenip_v4,
     if not bound:
         assert(last_e)
         raise last_e
-    listener.listen(10)
-    listener.print_listening("Redirector")
+    tcp_listener.listen(10)
+    tcp_listener.print_listening("Redirector")
 
+    bound = False
     if dns:
+        debug2('Binding DNS:')
+        ports = xrange(12300,9000,-1)
+        for port in ports:
+            debug2(' %d' % port)
+            dnslistener = independent_listener(socket.SOCK_DGRAM)
+            dnslistener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+            if listenip_v6:
+                lv6 = (listenip_v6[0],port)
+            else:
+                lv6 = None
+            if listenip_v4:
+                lv4 = (listenip_v4[0],port)
+            else:
+                lv4 = None
+
+            try:
+                dnslistener.bind( lv4, lv6 )
+                dnsport = port
+                bound = True
+                break
+            except socket.error, e:
+                if e.errno == errno.EADDRNOTAVAIL:
+                    last_e = e
+                else:
+                    raise e
+        debug2('\n')
         dnslistener.print_listening("DNS")
-        if dnslistener.v6:
-            dnsip = dnslistener.v6.getsockname()
-            dnsport = dnsip[1]
-        else:
-            dnsip = dnslistener.v4.getsockname()
-            dnsport = dnsip[1]
+        if not bound:
+            assert(last_e)
+            raise last_e
     else:
         dnsport = 0
         dnslistener = None
@@ -459,7 +482,7 @@ def main(listenip_v6, listenip_v4,
     fw = FirewallClient(redirectport, subnets_include, subnets_exclude, dnsport, tproxy)
     
     try:
-        return _main(listener, fw, ssh_cmd, remotename,
+        return _main(tcp_listener, fw, ssh_cmd, remotename,
                      python, latency_control, dnslistener,
                      tproxy, seed_hosts, auto_nets, syslog, 
                      daemon)
