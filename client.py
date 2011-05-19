@@ -367,7 +367,7 @@ def _main(listener, fw, ssh_cmd, remotename, python, latency_control,
                 del dnsreqs[chan]
         debug3('Remaining DNS requests: %d\n' % len(dnsreqs))
     if dnslistener:
-        dnslistener.add_handler(handlers, ondsn)
+        dnslistener.add_handler(handlers, ondns)
 
     if seed_hosts != None:
         debug1('seed_hosts: %r\n' % seed_hosts)
