@@ -129,7 +129,7 @@ class independent_listener:
                 else:
                     raise e
 
-    def bind(self, address_v4, address_v6):
+    def bind(self, address_v6, address_v4):
         if address_v6 and self.v6:
             self.v6.bind(address_v6)
         else:
@@ -431,7 +431,7 @@ def main(listenip_v6, listenip_v4,
             redirectport_v4 = 0
 
         try:
-            tcp_listener.bind(lv4, lv6)
+            tcp_listener.bind(lv6, lv4)
             bound = True
             break
         except Fatal, e:
@@ -471,7 +471,7 @@ def main(listenip_v6, listenip_v4,
                 dnsport_v4 = 0
 
             try:
-                dnslistener.bind( lv4, lv6 )
+                dnslistener.bind( lv6, lv4 )
                 bound = True
                 break
             except socket.error, e:
