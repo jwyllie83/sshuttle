@@ -1,8 +1,9 @@
-import struct, socket, select, errno, re, signal, time
+import struct, select, errno, re, signal, time
 import compat.ssubprocess as ssubprocess
 import helpers, ssnet, ssh, ssyslog
 from ssnet import SockWrapper, Handler, Proxy, Mux, MuxWrapper
 from helpers import *
+import socket_ext as socket
 
 _extra_fd = os.open('/dev/null', os.O_RDONLY)
 
@@ -13,6 +14,8 @@ def got_signal(signum, frame):
 
 _pidname = None
 IP_TRANSPARENT = 19
+IP_RECVORIGDSTADDR = 20
+IP_ORIGDSTADDR = 20
 
 def check_daemon(pidfile):
     global _pidname
@@ -229,7 +232,7 @@ class FirewallClient:
             raise Fatal('cleanup: %r returned %d' % (self.argv, rv))
 
 
-def _main(tcp_listener, fw, ssh_cmd, remotename, python, latency_control,
+def _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename, python, latency_control,
           dnslistener, tproxy, seed_hosts, auto_nets,
           syslog, daemon):
     handlers = []
@@ -310,11 +313,17 @@ def _main(tcp_listener, fw, ssh_cmd, remotename, python, latency_control,
     mux.got_host_list = onhostlist
 
     dnsreqs = {}
+    udp_by_src = {}
     def expire_connections(now):
         for chan,(peer,sock,timeout) in dnsreqs.items():
             if timeout < now:
                 del mux.channels[chan]
                 del dnsreqs[chan]
+        for src,(chan,timeout) in udp_by_src.items():
+            if timeout < now:
+                mux.send(chan, ssnet.CMD_UDP_CLOSE, None)
+                del mux.channels[chan]
+                del udp_by_src[src]
 
     def onaccept_tcp(listener_sock):
         global _extra_fd
@@ -353,6 +362,62 @@ def _main(tcp_listener, fw, ssh_cmd, remotename, python, latency_control,
         handlers.append(Proxy(SockWrapper(sock, sock), outwrap))
         expire_connections(time.time())
     tcp_listener.add_handler(handlers, onaccept_tcp)
+
+    def udp_done(chan, data, family, dstip):
+        (src,srcport,data) = data.split(",",2)
+        srcip = (src,int(srcport))
+        debug3('doing send from %r port %d to %r port %d\n' % (srcip[0],srcip[1],dstip[0],dstip[1],))
+
+        sock = socket.socket(family, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
+        sock.bind(srcip)
+        sock.sendto(data, dstip)
+        sock.close()
+
+    def onaccept_udp(listener_sock):
+        srcip, data, adata, flags = listener_sock.recvmsg((4096,),socket.CMSG_SPACE(24))
+        now = time.time()
+        dstip = None
+        family = None
+        print "a", srcip, data, adata, flags
+        for a in adata:
+            if a.cmsg_level == socket.SOL_IP and a.cmsg_type == IP_ORIGDSTADDR:
+                print "b",a.cmsg_level, a.cmsg_type
+                family,port = struct.unpack('=HH', a.cmsg_data[0:4])
+                port = socket.htons(port)
+                print "c", family, port, socket.AF_INET, socket.AF_INET6
+                if family == socket.AF_INET6:
+                    print "IPV6"
+                    start = 8
+                    length = 16
+                elif family == socket.AF_INET:
+                    print "IPV4"
+                    print struct.unpack("=BBBBBBBBBBBBBBBB",a.cmsg_data)
+                    start = 4
+                    length = 4
+                else:
+                    raise Fatal("Unsupported socket type '%s'"%family)
+                ip = socket.inet_ntop(family, a.cmsg_data[start:start+length])
+                dstip = (ip, port)
+                break
+        if not dstip:
+            debug1("-- ignored: couldn't determine destination IP address\n")
+            return
+        if srcip in udp_by_src:
+            chan,timeout = udp_by_src[srcip]
+        else:
+            chan = mux.next_channel()
+            mux.channels[chan] = lambda cmd,data: udp_done(chan,data,family,dstip=srcip)
+            mux.send(chan, ssnet.CMD_UDP_OPEN, family)
+        udp_by_src[srcip] = chan,now+30
+
+        hdr = "%s,%r,"%(dstip[0], dstip[1])
+        mux.send(chan, ssnet.CMD_UDP_DATA, hdr+data[0])
+
+        expire_connections(now)
+        debug3('Remaining UDP connections: %d\n' % len(udp_by_src))
+    udp_listener.add_handler(handlers, onaccept_udp)
 
     def dns_done(chan, data):
         peer,sock,timeout = dnsreqs.get(chan) or (None,None,None)
@@ -423,8 +488,13 @@ def main(listenip_v6, listenip_v4,
         tcp_listener = independent_listener()
         tcp_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
+        udp_listener = independent_listener(socket.SOCK_DGRAM)
+        udp_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
         if tproxy:
             tcp_listener.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
+            udp_listener.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
+            udp_listener.setsockopt(socket.SOL_IP, IP_RECVORIGDSTADDR, 1)
 
         if listenip_v6 and listenip_v6[1]:
             lv6 = listenip_v6
@@ -448,6 +518,7 @@ def main(listenip_v6, listenip_v4,
 
         try:
             tcp_listener.bind(lv6, lv4)
+            udp_listener.bind(lv6, lv4)
             bound = True
             break
         except socket.error, e:
@@ -461,6 +532,7 @@ def main(listenip_v6, listenip_v4,
         raise last_e
     tcp_listener.listen(10)
     tcp_listener.print_listening("TCP redirector")
+    udp_listener.print_listening("UDP redirector")
 
     bound = False
     if dns:

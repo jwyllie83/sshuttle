@@ -176,6 +176,8 @@ def do_iptables_tproxy(port, dnsport, family, subnets):
         ipt(family, table, '-A', divert_chain, '-j', 'ACCEPT')
         ipt(family, table, '-A', tproxy_chain, '-m', 'socket', '-j', divert_chain,
              '-m', 'tcp', '-p', 'tcp')
+        ipt(family, table, '-A', tproxy_chain, '-m', 'socket', '-j', divert_chain,
+             '-m', 'udp', '-p', 'udp')
 
     #ipt(family, table, '-A', mark_chain, '-o', 'lo', '-j', 'RETURN')
  
@@ -187,16 +189,29 @@ def do_iptables_tproxy(port, dnsport, family, subnets):
                 ipt(family, table, '-A', mark_chain, '-j', 'RETURN',
                     '--dest', '%s/%s' % (snet,swidth),
                     '-m', 'tcp', '-p', 'tcp')
+                ipt(family, table, '-A', mark_chain, '-j', 'RETURN',
+                    '--dest', '%s/%s' % (snet,swidth),
+                    '-m', 'udp', '-p', 'udp')
                 ipt(family, table, '-A', tproxy_chain, '-j', 'RETURN',
                     '--dest', '%s/%s' % (snet,swidth),
                     '-m', 'tcp', '-p', 'tcp')
+                ipt(family, table, '-A', tproxy_chain, '-j', 'RETURN',
+                    '--dest', '%s/%s' % (snet,swidth),
+                    '-m', 'udp', '-p', 'udp')
             else:
                 ipt(family, table, '-A', mark_chain, '-j', 'MARK', '--set-mark', '1',
                      '--dest', '%s/%s' % (snet,swidth),
                      '-m', 'tcp', '-p', 'tcp')
+                ipt(family, table, '-A', mark_chain, '-j', 'MARK', '--set-mark', '1',
+                     '--dest', '%s/%s' % (snet,swidth),
+                     '-m', 'udp', '-p', 'udp')
                 ipt(family, table, '-A', tproxy_chain, '-j', 'TPROXY', '--tproxy-mark', '0x1/0x1',
                      '--dest', '%s/%s' % (snet,swidth),
                      '-m', 'tcp', '-p', 'tcp',
+                     '--on-port', str(port))
+                ipt(family, table, '-A', tproxy_chain, '-j', 'TPROXY', '--tproxy-mark', '0x1/0x1',
+                     '--dest', '%s/%s' % (snet,swidth),
+                     '-m', 'udp', '-p', 'udp',
                      '--on-port', str(port))
                 
 
