@@ -144,10 +144,10 @@ try:
         else:
             sh = None
         if not opt.listen:
-            ipport_v6 = parse_ipport6('[::]:0')
+            ipport_v6 = parse_ipport6('[::1]:0')
             ipport_v4 = parse_ipport4('127.0.0.1:0')
         elif ':' in opt.listen:
-            ipport_v6 = parse_ipport6(opt.listen or '[::]:0')
+            ipport_v6 = parse_ipport6(opt.listen or '[::1]:0')
             ipport_v4 = None
         else:
             ipport_v6 = None
