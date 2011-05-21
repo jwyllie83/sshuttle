@@ -87,8 +87,9 @@ def original_dst(sock):
         SOCKADDR_MIN = 16
         sockaddr_in = sock.getsockopt(socket.SOL_IP,
                                       SO_ORIGINAL_DST, SOCKADDR_MIN)
-        (proto, port, a,b,c,d) = struct.unpack('!HHBBBB', sockaddr_in[:8])
-        assert(socket.htons(proto) == socket.AF_INET)
+        (proto, port, a,b,c,d) = struct.unpack('=HHBBBB', sockaddr_in[:8])
+        port = socket.htons(port)
+        assert(proto == socket.AF_INET)
         ip = '%d.%d.%d.%d' % (a,b,c,d)
         return (ip,port)
     except socket.error, e:
