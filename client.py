@@ -308,6 +308,12 @@ def _main(tcp_listener, fw, ssh_cmd, remotename, python, latency_control,
                 fw.sethostip(name, ip)
     mux.got_host_list = onhostlist
 
+    dnsreqs = {}
+    def expire_connections(now):
+        for chan,(peer,sock,timeout) in dnsreqs.items():
+            if timeout < now:
+                del dnsreqs[chan]
+
     def onaccept(listener_sock):
         global _extra_fd
         try:
@@ -343,9 +349,9 @@ def _main(tcp_listener, fw, ssh_cmd, remotename, python, latency_control,
         mux.send(chan, ssnet.CMD_CONNECT, '%s,%r' % (dstip[0], dstip[1]))
         outwrap = MuxWrapper(mux, chan)
         handlers.append(Proxy(SockWrapper(sock, sock), outwrap))
+        expire_connections(time.time())
     tcp_listener.add_handler(handlers, onaccept)
 
-    dnsreqs = {}
     def dns_done(chan, data):
         peer,sock,timeout = dnsreqs.get(chan) or (None,None,None)
         debug3('dns_done: channel=%r peer=%r\n' % (chan, peer))
@@ -362,9 +368,7 @@ def _main(tcp_listener, fw, ssh_cmd, remotename, python, latency_control,
             dnsreqs[chan] = peer,listener_sock,now+30
             mux.send(chan, ssnet.CMD_DNS_REQ, pkt)
             mux.channels[chan] = lambda cmd,data: dns_done(chan,data)
-        for chan,(peer,sock,timeout) in dnsreqs.items():
-            if timeout < now:
-                del dnsreqs[chan]
+        expire_connections(now)
         debug3('Remaining DNS requests: %d\n' % len(dnsreqs))
     if dnslistener:
         dnslistener.add_handler(handlers, ondns)
