@@ -108,6 +108,7 @@ class Hostwatch:
 
 class DnsProxy(Handler):
     def __init__(self, mux, chan, request):
+        # FIXME! IPv4 specific
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         Handler.__init__(self, [sock])
         self.timeout = time.time()+30
