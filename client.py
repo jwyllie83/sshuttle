@@ -313,6 +313,7 @@ def _main(tcp_listener, fw, ssh_cmd, remotename, python, latency_control,
     def expire_connections(now):
         for chan,(peer,sock,timeout) in dnsreqs.items():
             if timeout < now:
+                del mux.channels[chan]
                 del dnsreqs[chan]
 
     def onaccept_tcp(listener_sock):
@@ -357,6 +358,7 @@ def _main(tcp_listener, fw, ssh_cmd, remotename, python, latency_control,
         peer,sock,timeout = dnsreqs.get(chan) or (None,None,None)
         debug3('dns_done: channel=%r peer=%r\n' % (chan, peer))
         if peer:
+            del mux.channels[chan]
             del dnsreqs[chan]
             debug3('doing sendto %r\n' % (peer,))
             sock.sendto(data, peer)
