@@ -152,7 +152,7 @@ try:
             ipport_v4 = None
             list = opt.listen.split(",")
             for ip in list:
-                if ':' in ip:
+                if '[' in ip and ']' in ip:
                     ipport_v6 = parse_ipport6(ip)
                 else:
                     ipport_v4 = parse_ipport4(ip)
