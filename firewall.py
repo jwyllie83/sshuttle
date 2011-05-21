@@ -84,6 +84,11 @@ def do_iptables_nat(port, dnsport, family, subnets):
     # only ipv4 supported with NAT
     if family != socket.AF_INET:
         return
+    if not port:
+        subnets = None
+        port = dnsport
+    if not port:
+        return
 
     table = "nat"
     chain = 'sshuttle-%s' % port
@@ -132,6 +137,11 @@ def do_iptables_nat(port, dnsport, family, subnets):
 def do_iptables_tproxy(port, dnsport, family, subnets):
     if family not in [socket.AF_INET, socket.AF_INET6]:
         return
+    if not port:
+        subnets = None
+        port = dnsport
+    if not port:
+        return
 
     table = "mangle"
     mark_chain   = 'sshuttle-m-%s' % port
@@ -153,7 +163,7 @@ def do_iptables_tproxy(port, dnsport, family, subnets):
         ipt(family, table, '-F', divert_chain)
         ipt(family, table, '-X', divert_chain)
 
-    if subnets or dnsport:
+    if subnets:
         ipt(family, table, '-N', mark_chain)
         ipt(family, table, '-F', mark_chain)
         ipt(family, table, '-N', divert_chain)
@@ -461,11 +471,15 @@ def restore_etc_hosts(port):
 # exit.  In case that fails, it's not the end of the world; future runs will
 # supercede it in the transproxy list, at least, so the leftover rules
 # are hopefully harmless.
-def main(port, dnsport, tproxy, syslog):
-    assert(port > 0)
-    assert(port <= 65535)
-    assert(dnsport >= 0)
-    assert(dnsport <= 65535)
+def main(port_v6, port_v4, dnsport_v6, dnsport_v4, tproxy, syslog):
+    assert(port_v6 >= 0)
+    assert(port_v6 <= 65535)
+    assert(port_v4 >= 0)
+    assert(port_v4 <= 65535)
+    assert(dnsport_v6 >= 0)
+    assert(dnsport_v6 <= 65535)
+    assert(dnsport_v4 >= 0)
+    assert(dnsport_v4 <= 65535)
 
     if os.getuid() != 0:
         raise Fatal('you must be root (or enable su/sudo) to set the firewall')
@@ -522,8 +536,8 @@ def main(port, dnsport, tproxy, syslog):
     try:
         if line:
             debug1('firewall manager: starting transproxy.\n')
-            do_wait = do_it(port, dnsport, socket.AF_INET6, subnets)
-            do_wait = do_it(port, dnsport, socket.AF_INET, subnets)
+            do_wait = do_it(port_v6, dnsport_v6, socket.AF_INET6, subnets)
+            do_wait = do_it(port_v4, dnsport_v4, socket.AF_INET, subnets)
             sys.stdout.write('STARTED\n')
         
         try:
@@ -542,7 +556,7 @@ def main(port, dnsport, tproxy, syslog):
             if line.startswith('HOST '):
                 (name,ip) = line[5:].strip().split(',', 1)
                 hostmap[name] = ip
-                rewrite_etc_hosts(port)
+                rewrite_etc_hosts(port_v6 or port_v4)
             elif line:
                 raise Fatal('expected EOF, got %r' % line)
             else:
@@ -552,6 +566,6 @@ def main(port, dnsport, tproxy, syslog):
             debug1('firewall manager: undoing changes.\n')
         except:
             pass
-        do_it(port, 0, socket.AF_INET6, [])
-        do_it(port, 0, socket.AF_INET, [])
-        restore_etc_hosts(port)
+        do_it(port_v6, 0, socket.AF_INET6, [])
+        do_it(port_v4, 0, socket.AF_INET, [])
+        restore_etc_hosts(port_v6 or port_v4)

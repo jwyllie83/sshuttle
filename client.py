@@ -148,16 +148,16 @@ class independent_listener:
             debug1('%s listening on %r.\n' % (what, listenip, ))
 
 class FirewallClient:
-    def __init__(self, port, subnets_include, subnets_exclude, dnsport, tproxy):
-        self.port = port
+    def __init__(self, port_v6, port_v4, subnets_include, subnets_exclude, dnsport_v6, dnsport_v4, tproxy):
         self.auto_nets = []
         self.subnets_include = subnets_include
         self.subnets_exclude = subnets_exclude
-        self.dnsport = dnsport
         self.tproxy = tproxy
         argvbase = ([sys.argv[1], sys.argv[0], sys.argv[1]] +
                     ['-v'] * (helpers.verbose or 0) +
-                    ['--firewall', str(port), str(dnsport), str(tproxy or 0)])
+                    ['--firewall', str(port_v6), str(port_v4),
+                                   str(dnsport_v6), str(dnsport_v4),
+                                   str(tproxy or 0)])
         if ssyslog._p:
             argvbase += ['--syslog']
         argv_tries = [
@@ -398,12 +398,15 @@ def main(listenip_v6, listenip_v4,
             return 5
     debug1('Starting sshuttle proxy.\n')
     
-    if listenip_v4[1]:
-        ports = [listenip[1]]
+    if listenip_v6:
+        ports = [listenip_v6[1]]
+    elif listenip_v4:
+        ports = [listenip_v4[1]]
     else:
         ports = xrange(12300,9000,-1)
     last_e = None
-    redirectport = None
+    redirectport_v6 = 0
+    redirectport_v4 = 0
     bound = False
     debug2('Binding redirector:')
     for port in ports:
@@ -416,16 +419,19 @@ def main(listenip_v6, listenip_v4,
 
         if listenip_v6:
             lv6 = (listenip_v6[0],port)
+            redirectport_v6 = port
         else:
             lv6 = None
+            redirectport_v6 = 0
         if listenip_v4:
             lv4 = (listenip_v4[0],port)
+            redirectport_v4 = port
         else:
             lv4 = None
+            redirectport_v4 = 0
 
         try:
             tcp_listener.bind(lv4, lv6)
-            redirectport = port
             bound = True
             break
         except Fatal, e:
@@ -453,16 +459,19 @@ def main(listenip_v6, listenip_v4,
 
             if listenip_v6:
                 lv6 = (listenip_v6[0],port)
+                dnsport_v6 = port
             else:
                 lv6 = None
+                dnsport_v6 = 0
             if listenip_v4:
                 lv4 = (listenip_v4[0],port)
+                dnsport_v4 = port
             else:
                 lv4 = None
+                dnsport_v4 = 0
 
             try:
                 dnslistener.bind( lv4, lv6 )
-                dnsport = port
                 bound = True
                 break
             except socket.error, e:
@@ -476,13 +485,14 @@ def main(listenip_v6, listenip_v4,
             assert(last_e)
             raise last_e
     else:
-        dnsport = 0
+        dnsport_v6 = 0
+        dnsport_v4 = 0
         dnslistener = None
 
-    fw = FirewallClient(redirectport, subnets_include, subnets_exclude, dnsport, tproxy)
+    fw = FirewallClient(redirectport_v6, redirectport_v4, subnets_include, subnets_exclude, dnsport_v6, dnsport_v4, tproxy)
     
     try:
-        return _main(tcp_listener, fw, ssh_cmd, remotename,
+        return _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename,
                      python, latency_control, dnslistener,
                      tproxy, seed_hosts, auto_nets, syslog, 
                      daemon)

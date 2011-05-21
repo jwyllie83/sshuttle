@@ -118,10 +118,11 @@ try:
         server.tproxy = opt.tproxy
         sys.exit(server.main())
     elif opt.firewall:
-        if len(extra) != 3:
+        if len(extra) != 5:
             o.fatal('exactly three arguments expected')
-        sys.exit(firewall.main(int(extra[0]), int(extra[1]), 
-                               int(extra[2]), opt.syslog))
+        sys.exit(firewall.main(int(extra[0]), int(extra[1]),
+                               int(extra[2]), int(extra[3]),
+                               int(extra[4]), opt.syslog))
     elif opt.hostwatch:
         sys.exit(hostwatch.hw_main(extra))
     else:
@@ -146,12 +147,15 @@ try:
         if not opt.listen:
             ipport_v6 = parse_ipport6('[::1]:0')
             ipport_v4 = parse_ipport4('127.0.0.1:0')
-        elif ':' in opt.listen:
-            ipport_v6 = parse_ipport6(opt.listen or '[::1]:0')
-            ipport_v4 = None
         else:
             ipport_v6 = None
-            ipport_v4 = parse_ipport4(opt.listen or '127.0.0.1:0')
+            ipport_v4 = None
+            list = opt.listen.split(",")
+            for ip in list:
+                if ':' in ip:
+                    ipport_v6 = parse_ipport6(ip)
+                else:
+                    ipport_v4 = parse_ipport4(ip)
         sys.exit(client.main(ipport_v6, ipport_v4,
                              opt.ssh_cmd,
                              remotename,
