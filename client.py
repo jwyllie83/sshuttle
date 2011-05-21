@@ -398,9 +398,9 @@ def main(listenip_v6, listenip_v4,
             return 5
     debug1('Starting sshuttle proxy.\n')
     
-    if listenip_v6:
+    if listenip_v6 and listenip_v6[1]:
         ports = [listenip_v6[1]]
-    elif listenip_v4:
+    elif listenip_v4 and listenip_v4[1]:
         ports = [listenip_v4[1]]
     else:
         ports = xrange(12300,9000,-1)
