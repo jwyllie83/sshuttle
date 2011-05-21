@@ -145,14 +145,17 @@ try:
         else:
             sh = None
         if not opt.listen:
-            ipport_v6 = parse_ipport6('[::1]:0')
+            if opt.tproxy:
+                ipport_v6 = parse_ipport6('[::1]:0')
+            else:
+                ipport_v6 = None
             ipport_v4 = parse_ipport4('127.0.0.1:0')
         else:
             ipport_v6 = None
             ipport_v4 = None
             list = opt.listen.split(",")
             for ip in list:
-                if '[' in ip and ']' in ip:
+                if '[' in ip and ']' in ip and opt.tproxy:
                     ipport_v6 = parse_ipport6(ip)
                 else:
                     ipport_v4 = parse_ipport4(ip)
