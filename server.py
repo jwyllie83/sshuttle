@@ -243,4 +243,5 @@ def main():
             for channel,h in dnshandlers.items():
                 if h.timeout < now or not h.ok:
                     del dnshandlers[channel]
+                    h.sock.close()
                     h.ok = False
