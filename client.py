@@ -398,12 +398,14 @@ def main(listenip_v6, listenip_v4,
             return 5
     debug1('Starting sshuttle proxy.\n')
     
-    if listenip_v6 and listenip_v6[1]:
-        ports = [listenip_v6[1]]
-    elif listenip_v4 and listenip_v4[1]:
-        ports = [listenip_v4[1]]
+    if listenip_v6 and listenip_v6[1] and listenip_v4 and listenip_v4[1]:
+        # if both ports given, no need to search for a spare port
+        ports = [ 0, ]
     else:
+        # if at least one port missing, we have to search
         ports = xrange(12300,9000,-1)
+
+    # search for free ports and try to bind
     last_e = None
     redirectport_v6 = 0
     redirectport_v4 = 0
@@ -417,13 +419,20 @@ def main(listenip_v6, listenip_v4,
         if tproxy:
             tcp_listener.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
 
-        if listenip_v6:
+        if listenip_v6 and listenip_v6[1]:
+            lv6 = listenip_v6
+            redirectport_v6 = lv6[1]
+        elif listenip_v6:
             lv6 = (listenip_v6[0],port)
             redirectport_v6 = port
         else:
             lv6 = None
             redirectport_v6 = 0
-        if listenip_v4:
+
+        if listenip_v4 and listenip_v4[1]:
+            lv4 = listenip_v4
+            redirectport_v4 = lv4[1]
+        elif listenip_v4:
             lv4 = (listenip_v4[0],port)
             redirectport_v4 = port
         else:
@@ -434,8 +443,6 @@ def main(listenip_v6, listenip_v4,
             tcp_listener.bind(lv6, lv4)
             bound = True
             break
-        except Fatal, e:
-            raise e
         except socket.error, e:
             if e.errno == errno.EADDRNOTAVAIL:
                 last_e = e
@@ -450,6 +457,7 @@ def main(listenip_v6, listenip_v4,
 
     bound = False
     if dns:
+        # search for spare port for DNS
         debug2('Binding DNS:')
         ports = xrange(12300,9000,-1)
         for port in ports:
