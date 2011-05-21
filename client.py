@@ -314,7 +314,7 @@ def _main(tcp_listener, fw, ssh_cmd, remotename, python, latency_control,
             if timeout < now:
                 del dnsreqs[chan]
 
-    def onaccept(listener_sock):
+    def onaccept_tcp(listener_sock):
         global _extra_fd
         try:
             sock,srcip = listener_sock.accept()
@@ -350,7 +350,7 @@ def _main(tcp_listener, fw, ssh_cmd, remotename, python, latency_control,
         outwrap = MuxWrapper(mux, chan)
         handlers.append(Proxy(SockWrapper(sock, sock), outwrap))
         expire_connections(time.time())
-    tcp_listener.add_handler(handlers, onaccept)
+    tcp_listener.add_handler(handlers, onaccept_tcp)
 
     def dns_done(chan, data):
         peer,sock,timeout = dnsreqs.get(chan) or (None,None,None)
@@ -457,7 +457,7 @@ def main(listenip_v6, listenip_v4,
         assert(last_e)
         raise last_e
     tcp_listener.listen(10)
-    tcp_listener.print_listening("Redirector")
+    tcp_listener.print_listening("TCP redirector")
 
     bound = False
     if dns:
