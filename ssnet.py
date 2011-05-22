@@ -511,9 +511,8 @@ class MuxWrapper(SockWrapper):
                             % (cmd, len(data)))
 
 
-def connect_dst(ip, port):
+def connect_dst(family, ip, port):
     debug2('Connecting to %s:%d\n' % (ip, port))
-    family = guess_address_family(ip)
     outsock = socket.socket(family)
     outsock.setsockopt(socket.SOL_IP, socket.IP_TTL, 42)
     return SockWrapper(outsock, outsock,

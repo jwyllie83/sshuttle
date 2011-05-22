@@ -213,9 +213,10 @@ def main():
     mux.got_host_req = got_host_req
 
     def new_channel(channel, data):
-        (dstip,dstport) = data.split(',', 1)
+        (family,dstip,dstport) = data.split(',', 2)
+        family = int(family)
         dstport = int(dstport)
-        outwrap = ssnet.connect_dst(dstip,dstport)
+        outwrap = ssnet.connect_dst(family, dstip, dstport)
         handlers.append(Proxy(MuxWrapper(mux, channel), outwrap))
     mux.new_channel = new_channel
 
