@@ -14,8 +14,11 @@ def got_signal(signum, frame):
 
 _pidname = None
 IP_TRANSPARENT = 19
-IP_RECVORIGDSTADDR = 20
 IP_ORIGDSTADDR = 20
+IP_RECVORIGDSTADDR = IP_ORIGDSTADDR
+SOL_IPV6 = 41
+IPV6_ORIGDSTADDR = 74
+IPV6_RECVORIGDSTADDR = IPV6_ORIGDSTADDR
 
 def check_daemon(pidfile):
     global _pidname
@@ -382,16 +385,12 @@ def _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename, python, latency_c
         family = None
         print "a", srcip, data, adata, flags
         for a in adata:
+            print "b",a.cmsg_level, a.cmsg_type
             if a.cmsg_level == socket.SOL_IP and a.cmsg_type == IP_ORIGDSTADDR:
-                print "b",a.cmsg_level, a.cmsg_type
                 family,port = struct.unpack('=HH', a.cmsg_data[0:4])
                 port = socket.htons(port)
-                print "c", family, port, socket.AF_INET, socket.AF_INET6
-                if family == socket.AF_INET6:
-                    print "IPV6"
-                    start = 8
-                    length = 16
-                elif family == socket.AF_INET:
+                print "c4", family, port, socket.AF_INET, socket.AF_INET6
+                if family == socket.AF_INET:
                     print "IPV4"
                     print struct.unpack("=BBBBBBBBBBBBBBBB",a.cmsg_data)
                     start = 4
@@ -400,6 +399,20 @@ def _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename, python, latency_c
                     raise Fatal("Unsupported socket type '%s'"%family)
                 ip = socket.inet_ntop(family, a.cmsg_data[start:start+length])
                 dstip = (ip, port)
+                break
+            elif a.cmsg_level == SOL_IPV6 and a.cmsg_type == IPV6_ORIGDSTADDR:
+                family,port = struct.unpack('=HH', a.cmsg_data[0:4])
+                port = socket.htons(port)
+                print "c6", family, port, socket.AF_INET, socket.AF_INET6
+                if family == socket.AF_INET6:
+                    print "IPV6"
+                    start = 8
+                    length = 16
+                else:
+                    raise Fatal("Unsupported socket type '%s'"%family)
+                ip = socket.inet_ntop(family, a.cmsg_data[start:start+length])
+                dstip = (ip, port)
+                print dstip
                 break
         if not dstip:
             debug1("-- ignored: couldn't determine destination IP address\n")
@@ -494,7 +507,8 @@ def main(listenip_v6, listenip_v4,
         if tproxy:
             tcp_listener.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
             udp_listener.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
-            udp_listener.setsockopt(socket.SOL_IP, IP_RECVORIGDSTADDR, 1)
+            udp_listener.v4.setsockopt(socket.SOL_IP, IP_RECVORIGDSTADDR, 1)
+            udp_listener.v6.setsockopt(SOL_IPV6, IPV6_RECVORIGDSTADDR, 1)
 
         if listenip_v6 and listenip_v6[1]:
             lv6 = listenip_v6

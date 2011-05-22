@@ -118,6 +118,7 @@ class DnsProxy(Handler):
         self.peer = None
         self.request = request
         self.sock = sock
+        # FIXME! IPv4 specific
         self.sock.setsockopt(socket.SOL_IP, socket.IP_TTL, 42)
         self.try_send()
 
@@ -169,7 +170,8 @@ class UdpProxy(Handler):
         self.mux = mux
         self.chan = chan
         self.sock = sock
-        self.sock.setsockopt(socket.SOL_IP, socket.IP_TTL, 42)
+        if family == socket.AF_INET:
+            self.sock.setsockopt(socket.SOL_IP, socket.IP_TTL, 42)
 
     def send(self, dstip, data):
         debug2('UDP: sending to %r port %d\n' % dstip)
@@ -272,7 +274,7 @@ def main():
 
     def udp_open(channel, data):
         debug2('Incoming UDP open.\n')
-        family = int(data[0])
+        family = int(data)
         debug2('Incoming UDP open. %d.\n'%family)
         mux.channels[channel] = lambda cmd, data: udp_req(channel, cmd, data)
         if channel in udphandlers:
