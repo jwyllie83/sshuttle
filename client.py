@@ -593,7 +593,7 @@ def main(listenip_v6, listenip_v4,
     fw = FirewallClient(redirectport_v6, redirectport_v4, subnets_include, subnets_exclude, dnsport_v6, dnsport_v4, tproxy)
     
     try:
-        return _main(tcp_listener, fw, ssh_cmd, remotename,
+        return _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename,
                      python, latency_control, dnslistener,
                      tproxy, seed_hosts, auto_nets, syslog, 
                      daemon)
