@@ -326,9 +326,11 @@ def _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename, python, latency_c
         debug3('Remaining DNS requests: %d\n' % len(dnsreqs))
         for src,(chan,timeout) in udp_by_src.items():
             if timeout < now:
+                debug3('expiring UDP channel channel=%d peer=%r\n' % (chan, peer))
                 mux.send(chan, ssnet.CMD_UDP_CLOSE, None)
                 del mux.channels[chan]
                 del udp_by_src[src]
+        debug3('Remaining UDP channels: %d\n' % len(udp_by_src))
 
     def onaccept_tcp(listener_sock):
         global _extra_fd
@@ -431,7 +433,6 @@ def _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename, python, latency_c
         mux.send(chan, ssnet.CMD_UDP_DATA, hdr+data[0])
 
         expire_connections(now)
-        debug3('Remaining UDP connections: %d\n' % len(udp_by_src))
     udp_listener.add_handler(handlers, onaccept_udp)
 
     def dns_done(chan, data):
