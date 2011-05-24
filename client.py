@@ -3,7 +3,10 @@ import compat.ssubprocess as ssubprocess
 import helpers, ssnet, ssh, ssyslog
 from ssnet import SockWrapper, Handler, Proxy, Mux, MuxWrapper
 from helpers import *
-import socket_ext as socket
+try:
+    import socket_ext as socket
+except ImportError:
+    import socket
 
 _extra_fd = os.open('/dev/null', os.O_RDONLY)
 
@@ -155,7 +158,7 @@ class independent_listener:
             debug1('%s listening on %r.\n' % (what, listenip, ))
 
 class FirewallClient:
-    def __init__(self, port_v6, port_v4, subnets_include, subnets_exclude, dnsport_v6, dnsport_v4, tproxy):
+    def __init__(self, port_v6, port_v4, subnets_include, subnets_exclude, dnsport_v6, dnsport_v4, tproxy, udp):
         self.auto_nets = []
         self.subnets_include = subnets_include
         self.subnets_exclude = subnets_exclude
@@ -164,7 +167,7 @@ class FirewallClient:
                     ['-v'] * (helpers.verbose or 0) +
                     ['--firewall', str(port_v6), str(port_v4),
                                    str(dnsport_v6), str(dnsport_v4),
-                                   str(tproxy or 0)])
+                                   str(tproxy or 0), str(udp or 0)])
         if ssyslog._p:
             argvbase += ['--syslog']
         argv_tries = [
@@ -433,7 +436,8 @@ def _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename, python, latency_c
         mux.send(chan, ssnet.CMD_UDP_DATA, hdr+data[0])
 
         expire_connections(now)
-    udp_listener.add_handler(handlers, onaccept_udp)
+    if udp_listener:
+        udp_listener.add_handler(handlers, onaccept_udp)
 
     def dns_done(chan, data):
         peer,sock,timeout = dnsreqs.get(chan) or (None,None,None)
@@ -475,6 +479,7 @@ def main(listenip_v6, listenip_v4,
          ssh_cmd, remotename, python, latency_control, dns,
          tproxy, seed_hosts, auto_nets,
          subnets_include, subnets_exclude, syslog, daemon, pidfile):
+
     if syslog:
         ssyslog.start_syslog()
     if daemon:
@@ -484,7 +489,19 @@ def main(listenip_v6, listenip_v4,
             log("%s\n" % e)
             return 5
     debug1('Starting sshuttle proxy.\n')
-    
+
+    if tproxy:
+        try:
+            getattr(socket.socket,"recvmsg")
+            debug1("tproxy UDP support enabled.\n")
+            udp = True
+        except AttributeError, e:
+            debug1("tproxy UDP support requires recvmsg function.\n")
+            udp = False
+    else:
+        debug1("UDP support requires tproxy; disabling UDP.\n")
+        udp = False
+
     if listenip_v6 and listenip_v6[1] and listenip_v4 and listenip_v4[1]:
         # if both ports given, no need to search for a spare port
         ports = [ 0, ]
@@ -503,14 +520,17 @@ def main(listenip_v6, listenip_v4,
         tcp_listener = independent_listener()
         tcp_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-        udp_listener = independent_listener(socket.SOCK_DGRAM)
-        udp_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
         if tproxy:
             tcp_listener.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
+
+        if udp:
+            udp_listener = independent_listener(socket.SOCK_DGRAM)
+            udp_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             udp_listener.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
             udp_listener.v4.setsockopt(socket.SOL_IP, IP_RECVORIGDSTADDR, 1)
             udp_listener.v6.setsockopt(SOL_IPV6, IPV6_RECVORIGDSTADDR, 1)
+        else:
+            udp_listener = None
 
         if listenip_v6 and listenip_v6[1]:
             lv6 = listenip_v6
@@ -534,7 +554,8 @@ def main(listenip_v6, listenip_v4,
 
         try:
             tcp_listener.bind(lv6, lv4)
-            udp_listener.bind(lv6, lv4)
+            if udp_listener:
+                udp_listener.bind(lv6, lv4)
             bound = True
             break
         except socket.error, e:
@@ -548,7 +569,8 @@ def main(listenip_v6, listenip_v4,
         raise last_e
     tcp_listener.listen(10)
     tcp_listener.print_listening("TCP redirector")
-    udp_listener.print_listening("UDP redirector")
+    if udp_listener:
+        udp_listener.print_listening("UDP redirector")
 
     bound = False
     if dns:
@@ -592,7 +614,7 @@ def main(listenip_v6, listenip_v4,
         dnsport_v4 = 0
         dnslistener = None
 
-    fw = FirewallClient(redirectport_v6, redirectport_v4, subnets_include, subnets_exclude, dnsport_v6, dnsport_v4, tproxy)
+    fw = FirewallClient(redirectport_v6, redirectport_v4, subnets_include, subnets_exclude, dnsport_v6, dnsport_v4, tproxy, udp)
     
     try:
         return _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename,

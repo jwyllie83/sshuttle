@@ -80,7 +80,7 @@ def ipt_ttl(family, *args):
 # multiple copies shouldn't have overlapping subnets, or only the most-
 # recently-started one will win (because we use "-I OUTPUT 1" instead of
 # "-A OUTPUT").
-def do_iptables_nat(port, dnsport, family, subnets):
+def do_iptables_nat(port, dnsport, family, subnets, udp):
     # only ipv4 supported with NAT
     if family != socket.AF_INET:
         return
@@ -134,7 +134,7 @@ def do_iptables_nat(port, dnsport, family, subnets):
                     '--dport', '53',
                     '--to-ports', str(dnsport))
 
-def do_iptables_tproxy(port, dnsport, family, subnets):
+def do_iptables_tproxy(port, dnsport, family, subnets, udp):
     if family not in [socket.AF_INET, socket.AF_INET6]:
         return
     if not port:
@@ -176,6 +176,7 @@ def do_iptables_tproxy(port, dnsport, family, subnets):
         ipt(family, table, '-A', divert_chain, '-j', 'ACCEPT')
         ipt(family, table, '-A', tproxy_chain, '-m', 'socket', '-j', divert_chain,
              '-m', 'tcp', '-p', 'tcp')
+    if subnets and udp:
         ipt(family, table, '-A', tproxy_chain, '-m', 'socket', '-j', divert_chain,
              '-m', 'udp', '-p', 'udp')
 
@@ -184,31 +185,35 @@ def do_iptables_tproxy(port, dnsport, family, subnets):
     if subnets:
         for f,swidth,sexclude,snet in sorted(subnets, key=lambda s: s[1], reverse=True):
             if f != family:
-                pass
-            elif sexclude:
+                continue
+
+            if sexclude:
                 ipt(family, table, '-A', mark_chain, '-j', 'RETURN',
-                    '--dest', '%s/%s' % (snet,swidth),
-                    '-m', 'tcp', '-p', 'tcp')
-                ipt(family, table, '-A', mark_chain, '-j', 'RETURN',
-                    '--dest', '%s/%s' % (snet,swidth),
-                    '-m', 'udp', '-p', 'udp')
-                ipt(family, table, '-A', tproxy_chain, '-j', 'RETURN',
                     '--dest', '%s/%s' % (snet,swidth),
                     '-m', 'tcp', '-p', 'tcp')
                 ipt(family, table, '-A', tproxy_chain, '-j', 'RETURN',
                     '--dest', '%s/%s' % (snet,swidth),
-                    '-m', 'udp', '-p', 'udp')
+                    '-m', 'tcp', '-p', 'tcp')
             else:
                 ipt(family, table, '-A', mark_chain, '-j', 'MARK', '--set-mark', '1',
                      '--dest', '%s/%s' % (snet,swidth),
                      '-m', 'tcp', '-p', 'tcp')
-                ipt(family, table, '-A', mark_chain, '-j', 'MARK', '--set-mark', '1',
-                     '--dest', '%s/%s' % (snet,swidth),
-                     '-m', 'udp', '-p', 'udp')
                 ipt(family, table, '-A', tproxy_chain, '-j', 'TPROXY', '--tproxy-mark', '0x1/0x1',
                      '--dest', '%s/%s' % (snet,swidth),
                      '-m', 'tcp', '-p', 'tcp',
                      '--on-port', str(port))
+
+            if sexclude and udp:
+                ipt(family, table, '-A', mark_chain, '-j', 'RETURN',
+                    '--dest', '%s/%s' % (snet,swidth),
+                    '-m', 'udp', '-p', 'udp')
+                ipt(family, table, '-A', tproxy_chain, '-j', 'RETURN',
+                    '--dest', '%s/%s' % (snet,swidth),
+                    '-m', 'udp', '-p', 'udp')
+            elif udp:
+                ipt(family, table, '-A', mark_chain, '-j', 'MARK', '--set-mark', '1',
+                     '--dest', '%s/%s' % (snet,swidth),
+                     '-m', 'udp', '-p', 'udp')
                 ipt(family, table, '-A', tproxy_chain, '-j', 'TPROXY', '--tproxy-mark', '0x1/0x1',
                      '--dest', '%s/%s' % (snet,swidth),
                      '-m', 'udp', '-p', 'udp',
@@ -320,7 +325,7 @@ def ipfw(*args):
         raise Fatal('%r returned %d' % (argv, rv))
 
 
-def do_ipfw(port, dnsport, family, subnets):
+def do_ipfw(port, dnsport, family, subnets, udp):
     # IPv6 support TODO
     if family != socket.AF_INET:
         return
@@ -486,7 +491,7 @@ def restore_etc_hosts(port):
 # exit.  In case that fails, it's not the end of the world; future runs will
 # supercede it in the transproxy list, at least, so the leftover rules
 # are hopefully harmless.
-def main(port_v6, port_v4, dnsport_v6, dnsport_v4, tproxy, syslog):
+def main(port_v6, port_v4, dnsport_v6, dnsport_v4, tproxy, udp, syslog):
     assert(port_v6 >= 0)
     assert(port_v6 <= 65535)
     assert(port_v4 >= 0)
@@ -551,8 +556,8 @@ def main(port_v6, port_v4, dnsport_v6, dnsport_v4, tproxy, syslog):
     try:
         if line:
             debug1('firewall manager: starting transproxy.\n')
-            do_wait = do_it(port_v6, dnsport_v6, socket.AF_INET6, subnets)
-            do_wait = do_it(port_v4, dnsport_v4, socket.AF_INET, subnets)
+            do_wait = do_it(port_v6, dnsport_v6, socket.AF_INET6, subnets, udp)
+            do_wait = do_it(port_v4, dnsport_v4, socket.AF_INET, subnets, udp)
             sys.stdout.write('STARTED\n')
         
         try:
@@ -581,6 +586,6 @@ def main(port_v6, port_v4, dnsport_v6, dnsport_v4, tproxy, syslog):
             debug1('firewall manager: undoing changes.\n')
         except:
             pass
-        do_it(port_v6, 0, socket.AF_INET6, [])
-        do_it(port_v4, 0, socket.AF_INET, [])
+        do_it(port_v6, 0, socket.AF_INET6, [], udp)
+        do_it(port_v4, 0, socket.AF_INET, [], udp)
         restore_etc_hosts(port_v6 or port_v4)
