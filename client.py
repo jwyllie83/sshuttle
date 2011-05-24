@@ -356,7 +356,7 @@ def _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename, python, latency_c
             dstip = sock.getsockname();
         else:
             dstip = original_dst(sock)
-        debug1('Accept: %s:%r -> %s:%r.\n' % (srcip[0],srcip[1],
+        debug1('Accept TCP: %s:%r -> %s:%r.\n' % (srcip[0],srcip[1],
                                               dstip[0],dstip[1]))
         if dstip[1] == sock.getsockname()[1] and islocal(dstip[0],sock.family):
             debug1("-- ignored: that's my address!\n")
@@ -390,16 +390,11 @@ def _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename, python, latency_c
         now = time.time()
         dstip = None
         family = None
-        print "a", srcip, data, adata, flags
         for a in adata:
-            print "b",a.cmsg_level, a.cmsg_type
             if a.cmsg_level == socket.SOL_IP and a.cmsg_type == IP_ORIGDSTADDR:
                 family,port = struct.unpack('=HH', a.cmsg_data[0:4])
                 port = socket.htons(port)
-                print "c4", family, port, socket.AF_INET, socket.AF_INET6
                 if family == socket.AF_INET:
-                    print "IPV4"
-                    print struct.unpack("=BBBBBBBBBBBBBBBB",a.cmsg_data)
                     start = 4
                     length = 4
                 else:
@@ -410,20 +405,19 @@ def _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename, python, latency_c
             elif a.cmsg_level == SOL_IPV6 and a.cmsg_type == IPV6_ORIGDSTADDR:
                 family,port = struct.unpack('=HH', a.cmsg_data[0:4])
                 port = socket.htons(port)
-                print "c6", family, port, socket.AF_INET, socket.AF_INET6
                 if family == socket.AF_INET6:
-                    print "IPV6"
                     start = 8
                     length = 16
                 else:
                     raise Fatal("Unsupported socket type '%s'"%family)
                 ip = socket.inet_ntop(family, a.cmsg_data[start:start+length])
                 dstip = (ip, port)
-                print dstip
                 break
         if not dstip:
-            debug1("-- ignored: couldn't determine destination IP address\n")
+            debug1("-- ignored UDP from %s:%r: couldn't determine destination IP address\n"%srcip)
             return
+        debug1('Accept UDP: %s:%r -> %s:%r.\n' % (srcip[0],srcip[1],
+                                              dstip[0],dstip[1]))
         if srcip in udp_by_src:
             chan,timeout = udp_by_src[srcip]
         else:
