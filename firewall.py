@@ -20,7 +20,7 @@ def ipt_chain_exists(family, table, name):
     elif family == socket.AF_INET:
         cmd = 'iptables'
     else:
-        raise Fatal("Unsupported socket type '%s'"%family)
+        raise Fatal("Unsupported family '%s'"%family_to_string(family))
     argv = [cmd, '-t', table, '-nL']
     p = ssubprocess.Popen(argv, stdout = ssubprocess.PIPE)
     for line in p.stdout:
@@ -51,7 +51,7 @@ def ipt(family, *args):
     elif family == socket.AF_INET:
         ipt4(*args)
     else:
-        raise Fatal("Unsupported socket type '%s'"%family)
+        raise Fatal("Unsupported family '%s'"%family_to_string(family))
     
 
 _no_ttl_module = False
@@ -74,7 +74,6 @@ def ipt_ttl(family, *args):
         ipt(family, *args)
 
 
-
 # We name the chain based on the transproxy port number so that it's possible
 # to run multiple copies of sshuttle at the same time.  Of course, the
 # multiple copies shouldn't have overlapping subnets, or only the most-
@@ -82,13 +81,10 @@ def ipt_ttl(family, *args):
 # "-A OUTPUT").
 def do_iptables_nat(port, dnsport, family, subnets, udp):
     # only ipv4 supported with NAT
-    if family != socket.AF_INET:
-        return
-    if not port:
-        subnets = None
-        port = dnsport
-    if not port:
-        return
+    if family not in [socket.AF_INET, ]:
+        raise Fatal("Address family '%s' unsupported by nat method"%family_to_string(family))
+    if udp:
+        raise Fatal("UDP not supported by nat method")
 
     table = "nat"
     chain = 'sshuttle-%s' % port
@@ -135,13 +131,8 @@ def do_iptables_nat(port, dnsport, family, subnets, udp):
                     '--to-ports', str(dnsport))
 
 def do_iptables_tproxy(port, dnsport, family, subnets, udp):
-    if family not in [socket.AF_INET, socket.AF_INET6]:
-        return
-    if not port:
-        subnets = None
-        port = dnsport
-    if not port:
-        return
+    if family not in [socket.AF_INET, sock.socket.AF_INET6]:
+        raise Fatal("Address family '%s' unsupported by tproxy method"%family_to_string(family))
 
     table = "mangle"
     mark_chain   = 'sshuttle-m-%s' % port
@@ -326,9 +317,11 @@ def ipfw(*args):
 
 
 def do_ipfw(port, dnsport, family, subnets, udp):
-    # IPv6 support TODO
-    if family != socket.AF_INET:
-        return
+    # IPv6 not supported
+    if family not in [socket.AF_INET, ]:
+        raise Fatal("Address family '%s' unsupported by ipfw method"%family_to_string(family))
+    if udp:
+        raise Fatal("UDP not supported by ipfw method")
 
     sport = str(port)
     xsport = str(port+1)
@@ -491,7 +484,7 @@ def restore_etc_hosts(port):
 # exit.  In case that fails, it's not the end of the world; future runs will
 # supercede it in the transproxy list, at least, so the leftover rules
 # are hopefully harmless.
-def main(port_v6, port_v4, dnsport_v6, dnsport_v4, tproxy, udp, syslog):
+def main(port_v6, port_v4, dnsport_v6, dnsport_v4, method, udp, syslog):
     assert(port_v6 >= 0)
     assert(port_v6 <= 65535)
     assert(port_v4 >= 0)
@@ -504,15 +497,21 @@ def main(port_v6, port_v4, dnsport_v6, dnsport_v4, tproxy, udp, syslog):
     if os.getuid() != 0:
         raise Fatal('you must be root (or enable su/sudo) to set the firewall')
 
-    if program_exists('ipfw'):
-        do_it = do_ipfw
-    elif program_exists('iptables'):
-        if tproxy:
-            do_it = do_iptables_tproxy
-        else:
+    if method == "auto":
+        if program_exists('ipfw'):
+            do_it = do_ipfw
+        elif program_exists('iptables'):
             do_it = do_iptables_nat
+        else:
+            raise Fatal("can't find either ipfw or iptables; check your PATH")
+    elif method == "nat":
+        do_it = do_iptables_nat
+    elif method == "tproxy":
+        do_it = do_iptables_tproxy
+    elif method == "ipfw":
+        do_it = do_ipfw
     else:
-        raise Fatal("can't find either ipfw or iptables; check your PATH")
+        raise Fatal("Unknown method '%s'"%method)
 
     # because of limitations of the 'su' command, the *real* stdin/stdout
     # are both attached to stdout initially.  Clone stdout into stdin so we
@@ -556,8 +555,19 @@ def main(port_v6, port_v4, dnsport_v6, dnsport_v4, tproxy, udp, syslog):
     try:
         if line:
             debug1('firewall manager: starting transproxy.\n')
-            do_wait = do_it(port_v6, dnsport_v6, socket.AF_INET6, subnets, udp)
-            do_wait = do_it(port_v4, dnsport_v4, socket.AF_INET, subnets, udp)
+
+            subnets_v6 = filter(lambda i: i[0]==socket.AF_INET6, subnets)
+            if port_v6:
+                do_wait = do_it(port_v6, dnsport_v6, socket.AF_INET6, fsubnets_v6, udp)
+            elif len(subnets_v6) > 0:
+                debug1("IPv6 subnets defined but IPv6 disabled\n")
+
+            subnets_v4 = filter(lambda i: i[0]==socket.AF_INET, subnets)
+            if port_v4:
+                do_wait = do_it(port_v4, dnsport_v4, socket.AF_INET, subnets_v4, udp)
+            elif len(subnets_v4) > 0:
+                debug1("IPv4 subnets defined but IPv4 disabled\n")
+
             sys.stdout.write('STARTED\n')
         
         try:
@@ -586,6 +596,8 @@ def main(port_v6, port_v4, dnsport_v6, dnsport_v4, tproxy, udp, syslog):
             debug1('firewall manager: undoing changes.\n')
         except:
             pass
-        do_it(port_v6, 0, socket.AF_INET6, [], udp)
-        do_it(port_v4, 0, socket.AF_INET, [], udp)
+        if port_v6:
+            do_it(port_v6, 0, socket.AF_INET6, [], udp)
+        if port_v4:
+            do_it(port_v4, 0, socket.AF_INET, [], udp)
         restore_etc_hosts(port_v6 or port_v4)

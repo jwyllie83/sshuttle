@@ -158,16 +158,16 @@ class independent_listener:
             debug1('%s listening on %r.\n' % (what, listenip, ))
 
 class FirewallClient:
-    def __init__(self, port_v6, port_v4, subnets_include, subnets_exclude, dnsport_v6, dnsport_v4, tproxy, udp):
+    def __init__(self, port_v6, port_v4, subnets_include, subnets_exclude, dnsport_v6, dnsport_v4, method, udp):
         self.auto_nets = []
         self.subnets_include = subnets_include
         self.subnets_exclude = subnets_exclude
-        self.tproxy = tproxy
+        self.method = method
         argvbase = ([sys.argv[1], sys.argv[0], sys.argv[1]] +
                     ['-v'] * (helpers.verbose or 0) +
                     ['--firewall', str(port_v6), str(port_v4),
                                    str(dnsport_v6), str(dnsport_v4),
-                                   str(tproxy or 0), str(udp or 0)])
+                                   method, str(udp or 0)])
         if ssyslog._p:
             argvbase += ['--syslog']
         argv_tries = [
@@ -239,7 +239,7 @@ class FirewallClient:
 
 
 def _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename, python, latency_control,
-          dnslistener, tproxy, seed_hosts, auto_nets,
+          dnslistener, method, seed_hosts, auto_nets,
           syslog, daemon):
     handlers = []
     if helpers.verbose >= 1:
@@ -251,7 +251,7 @@ def _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename, python, latency_c
     try:
         (serverproc, serversock) = ssh.connect(ssh_cmd, remotename, python,
                         stderr=ssyslog._p and ssyslog._p.stdin,
-                        options=dict(latency_control=latency_control, tproxy=tproxy))
+                        options=dict(latency_control=latency_control, method=method))
     except socket.error, e:
         if e.args[0] == errno.EPIPE:
             raise Fatal("failed to establish ssh session (1)")
@@ -352,7 +352,7 @@ def _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename, python, latency_c
                 return
             else:
                 raise
-        if tproxy:
+        if method == "tproxy":
             dstip = sock.getsockname();
         else:
             dstip = original_dst(sock)
@@ -477,7 +477,7 @@ def _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename, python, latency_c
 
 def main(listenip_v6, listenip_v4,
          ssh_cmd, remotename, python, latency_control, dns,
-         tproxy, seed_hosts, auto_nets,
+         method, seed_hosts, auto_nets,
          subnets_include, subnets_exclude, syslog, daemon, pidfile):
 
     if syslog:
@@ -490,7 +490,7 @@ def main(listenip_v6, listenip_v4,
             return 5
     debug1('Starting sshuttle proxy.\n')
 
-    if tproxy:
+    if method == "tproxy":
         try:
             getattr(socket.socket,"recvmsg")
             debug1("tproxy UDP support enabled.\n")
@@ -520,7 +520,7 @@ def main(listenip_v6, listenip_v4,
         tcp_listener = independent_listener()
         tcp_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-        if tproxy:
+        if method == "tproxy":
             tcp_listener.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
 
         if udp:
@@ -614,12 +614,12 @@ def main(listenip_v6, listenip_v4,
         dnsport_v4 = 0
         dnslistener = None
 
-    fw = FirewallClient(redirectport_v6, redirectport_v4, subnets_include, subnets_exclude, dnsport_v6, dnsport_v4, tproxy, udp)
+    fw = FirewallClient(redirectport_v6, redirectport_v4, subnets_include, subnets_exclude, dnsport_v6, dnsport_v4, method, udp)
     
     try:
         return _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename,
                      python, latency_control, dnslistener,
-                     tproxy, seed_hosts, auto_nets, syslog, 
+                     method, seed_hosts, auto_nets, syslog, 
                      daemon)
     finally:
         try:

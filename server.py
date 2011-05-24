@@ -276,7 +276,6 @@ def main():
     def udp_open(channel, data):
         debug2('Incoming UDP open.\n')
         family = int(data)
-        debug2('Incoming UDP open. %d.\n'%family)
         mux.channels[channel] = lambda cmd, data: udp_req(channel, cmd, data)
         if channel in udphandlers:
             raise Fatal('UDP connection channel %d already open'%channel)

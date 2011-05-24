@@ -78,3 +78,12 @@ def guess_address_family(ip):
         return socket.AF_INET6
     else:
         return socket.AF_INET
+
+def family_to_string(family):
+    if family == socket.AF_INET6:
+        return "AF_INET6"
+    elif family == socket.AF_INET:
+        return "AF_INET"
+    else:
+        return str(family)
+

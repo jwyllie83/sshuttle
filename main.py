@@ -84,7 +84,7 @@ l,listen=  transproxy to this ip address and port number
 H,auto-hosts scan for remote hostnames and update local /etc/hosts
 N,auto-nets  automatically determine subnets to route
 dns        capture local DNS requests and forward to the remote DNS server
-tproxy     tproxy support
+method=    auto, nat, tproxy, or ipfw
 python=    path to python interpreter on the remote server
 r,remote=  ssh hostname (and optional username) of remote sshuttle server
 x,exclude= exclude this subnet (can be used more than once)
@@ -115,14 +115,14 @@ try:
         if len(extra) != 0:
             o.fatal('no arguments expected')
         server.latency_control = opt.latency_control
-        server.tproxy = opt.tproxy
+        server.method = opt.method
         sys.exit(server.main())
     elif opt.firewall:
         if len(extra) != 6:
             o.fatal('exactly six arguments expected')
         sys.exit(firewall.main(int(extra[0]), int(extra[1]),
                                int(extra[2]), int(extra[3]),
-                               int(extra[4]), int(extra[5]), opt.syslog))
+                               extra[4], int(extra[5]), opt.syslog))
     elif opt.hostwatch:
         sys.exit(hostwatch.hw_main(extra))
     else:
@@ -144,8 +144,14 @@ try:
             sh = []
         else:
             sh = None
+        if not opt.method:
+            method = "auto"
+        elif opt.method in [ "auto", "nat", "tproxy", "ipfw" ]:
+            method = opt.method
+        else:
+            o.fatal("method %s not supported"%opt.method)
         if not opt.listen:
-            if opt.tproxy:
+            if opt.method == "tproxy":
                 ipport_v6 = parse_ipport6('[::1]:0')
             else:
                 ipport_v6 = None
@@ -155,7 +161,7 @@ try:
             ipport_v4 = None
             list = opt.listen.split(",")
             for ip in list:
-                if '[' in ip and ']' in ip and opt.tproxy:
+                if '[' in ip and ']' in ip and opt.method == "tproxy":
                     ipport_v6 = parse_ipport6(ip)
                 else:
                     ipport_v4 = parse_ipport4(ip)
@@ -165,7 +171,7 @@ try:
                              opt.python,
                              opt.latency_control,
                              opt.dns,
-                             opt.tproxy,
+                             method,
                              sh,
                              opt.auto_nets,
                              parse_subnets(includes),
