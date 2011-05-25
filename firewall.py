@@ -129,7 +129,7 @@ def do_iptables_nat(port, dnsport, family, subnets, udp):
                     '--to-ports', str(dnsport))
 
 def do_iptables_tproxy(port, dnsport, family, subnets, udp):
-    if family not in [socket.AF_INET, sock.socket.AF_INET6]:
+    if family not in [socket.AF_INET, socket.AF_INET6]:
         raise Fatal("Address family '%s' unsupported by tproxy method"%family_to_string(family))
 
     table = "mangle"
@@ -553,7 +553,7 @@ def main(port_v6, port_v4, dnsport_v6, dnsport_v4, method, udp, syslog):
 
             subnets_v6 = filter(lambda i: i[0]==socket.AF_INET6, subnets)
             if port_v6:
-                do_wait = do_it(port_v6, dnsport_v6, socket.AF_INET6, fsubnets_v6, udp)
+                do_wait = do_it(port_v6, dnsport_v6, socket.AF_INET6, subnets_v6, udp)
             elif len(subnets_v6) > 0:
                 debug1("IPv6 subnets defined but IPv6 disabled\n")
 
