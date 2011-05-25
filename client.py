@@ -330,7 +330,7 @@ def _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename, python, latency_c
         for src,(chan,timeout) in udp_by_src.items():
             if timeout < now:
                 debug3('expiring UDP channel channel=%d peer=%r\n' % (chan, peer))
-                mux.send(chan, ssnet.CMD_UDP_CLOSE, None)
+                mux.send(chan, ssnet.CMD_UDP_CLOSE, '')
                 del mux.channels[chan]
                 del udp_by_src[src]
         debug3('Remaining UDP channels: %d\n' % len(udp_by_src))
