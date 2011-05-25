@@ -109,9 +109,7 @@ def do_iptables_nat(port, dnsport, family, subnets, udp):
         # excludes to come first.  That's why the columns are in such a non-
         # intuitive order.
         for f,swidth,sexclude,snet in sorted(subnets, key=lambda s: s[1], reverse=True):
-            if f != family:
-                pass
-            elif sexclude:
+            if sexclude:
                 ipt(family, table, '-A', chain, '-j', 'RETURN',
                     '--dest', '%s/%s' % (snet,swidth),
                     '-p', 'tcp')
@@ -175,9 +173,6 @@ def do_iptables_tproxy(port, dnsport, family, subnets, udp):
  
     if subnets:
         for f,swidth,sexclude,snet in sorted(subnets, key=lambda s: s[1], reverse=True):
-            if f != family:
-                continue
-
             if sexclude:
                 ipt(family, table, '-A', mark_chain, '-j', 'RETURN',
                     '--dest', '%s/%s' % (snet,swidth),
