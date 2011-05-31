@@ -119,11 +119,11 @@ class independent_listener:
         if self.v4:
             self.v4.setsockopt(level, optname, value)
 
-    def add_handler(self, handlers, handler):
+    def add_handler(self, handlers, handler, method, mux):
         if self.v6:
-            handlers.append(Handler([self.v6], lambda: handler(self.v6)))
+            handlers.append(Handler([self.v6], lambda: handler(self.v6, method, mux, handlers)))
         if self.v4:
-            handlers.append(Handler([self.v4], lambda: handler(self.v4)))
+            handlers.append(Handler([self.v4], lambda: handler(self.v4, method, mux, handlers)))
 
     def listen(self, backlog):
         if self.v6:
@@ -238,6 +238,144 @@ class FirewallClient:
             raise Fatal('cleanup: %r returned %d' % (self.argv, rv))
 
 
+dnsreqs = {}
+udp_by_src = {}
+def expire_connections(now):
+    for chan,(peer,sock,timeout) in dnsreqs.items():
+        if timeout < now:
+            debug3('expiring dnsreqs channel=%d peer=%r\n' % (chan, peer))
+            del mux.channels[chan]
+            del dnsreqs[chan]
+    debug3('Remaining DNS requests: %d\n' % len(dnsreqs))
+    for src,(chan,timeout) in udp_by_src.items():
+        if timeout < now:
+            debug3('expiring UDP channel channel=%d peer=%r\n' % (chan, peer))
+            mux.send(chan, ssnet.CMD_UDP_CLOSE, '')
+            del mux.channels[chan]
+            del udp_by_src[src]
+    debug3('Remaining UDP channels: %d\n' % len(udp_by_src))
+
+
+def onaccept_tcp(listener, method, mux, handlers):
+    global _extra_fd
+    try:
+        sock,srcip = listener.accept()
+    except socket.error, e:
+        if e.args[0] in [errno.EMFILE, errno.ENFILE]:
+            debug1('Rejected incoming connection: too many open files!\n')
+            # free up an fd so we can eat the connection
+            os.close(_extra_fd)
+            try:
+                sock,srcip = listener.accept()
+                sock.close()
+            finally:
+                _extra_fd = os.open('/dev/null', os.O_RDONLY)
+            return
+        else:
+            raise
+    if method == "tproxy":
+        dstip = sock.getsockname();
+    else:
+        dstip = original_dst(sock)
+    debug1('Accept TCP: %s:%r -> %s:%r.\n' % (srcip[0],srcip[1],
+                                          dstip[0],dstip[1]))
+    if dstip[1] == sock.getsockname()[1] and islocal(dstip[0],sock.family):
+        debug1("-- ignored: that's my address!\n")
+        sock.close()
+        return
+    chan = mux.next_channel()
+    if not chan:
+        log('warning: too many open channels.  Discarded connection.\n')
+        sock.close()
+        return
+    mux.send(chan, ssnet.CMD_TCP_CONNECT, '%d,%s,%r' % (sock.family, dstip[0], dstip[1]))
+    outwrap = MuxWrapper(mux, chan)
+    handlers.append(Proxy(SockWrapper(sock, sock), outwrap))
+    expire_connections(time.time())
+
+
+def udp_done(chan, data, family, dstip):
+    (src,srcport,data) = data.split(",",2)
+    srcip = (src,int(srcport))
+    debug3('doing send from %r port %d to %r port %d\n' % (srcip[0],srcip[1],dstip[0],dstip[1],))
+
+    sock = socket.socket(family, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
+    sock.bind(srcip)
+    sock.sendto(data, dstip)
+    sock.close()
+
+
+def onaccept_udp(listener, method, mux, handlers):
+    srcip, data, adata, flags = listener.recvmsg((4096,),socket.CMSG_SPACE(24))
+    now = time.time()
+    dstip = None
+    family = None
+    for a in adata:
+        if a.cmsg_level == socket.SOL_IP and a.cmsg_type == IP_ORIGDSTADDR:
+            family,port = struct.unpack('=HH', a.cmsg_data[0:4])
+            port = socket.htons(port)
+            if family == socket.AF_INET:
+                start = 4
+                length = 4
+            else:
+                raise Fatal("Unsupported socket type '%s'"%family)
+            ip = socket.inet_ntop(family, a.cmsg_data[start:start+length])
+            dstip = (ip, port)
+            break
+        elif a.cmsg_level == SOL_IPV6 and a.cmsg_type == IPV6_ORIGDSTADDR:
+            family,port = struct.unpack('=HH', a.cmsg_data[0:4])
+            port = socket.htons(port)
+            if family == socket.AF_INET6:
+                start = 8
+                length = 16
+            else:
+                raise Fatal("Unsupported socket type '%s'"%family)
+            ip = socket.inet_ntop(family, a.cmsg_data[start:start+length])
+            dstip = (ip, port)
+            break
+    if not dstip:
+        debug1("-- ignored UDP from %s:%r: couldn't determine destination IP address\n"%srcip)
+        return
+    debug1('Accept UDP: %s:%r -> %s:%r.\n' % (srcip[0],srcip[1],
+                                          dstip[0],dstip[1]))
+    if srcip in udp_by_src:
+        chan,timeout = udp_by_src[srcip]
+    else:
+        chan = mux.next_channel()
+        mux.channels[chan] = lambda cmd,data: udp_done(chan,data,family,dstip=srcip)
+        mux.send(chan, ssnet.CMD_UDP_OPEN, family)
+    udp_by_src[srcip] = chan,now+30
+
+    hdr = "%s,%r,"%(dstip[0], dstip[1])
+    mux.send(chan, ssnet.CMD_UDP_DATA, hdr+data[0])
+
+    expire_connections(now)
+
+
+def dns_done(chan, mux, data):
+    peer,sock,timeout = dnsreqs.get(chan) or (None,None,None)
+    debug3('dns_done: channel=%d peer=%r\n' % (chan, peer))
+    if peer:
+        del mux.channels[chan]
+        del dnsreqs[chan]
+        debug3('doing sendto %r\n' % (peer,))
+        sock.sendto(data, peer)
+
+
+def ondns(listener, method, mux, handlers):
+    pkt,peer = listener.recvfrom(4096)
+    now = time.time()
+    if pkt:
+        debug1('DNS request from %r: %d bytes\n' % (peer, len(pkt)))
+        chan = mux.next_channel()
+        dnsreqs[chan] = peer,listener,now+30
+        mux.send(chan, ssnet.CMD_DNS_REQ, pkt)
+        mux.channels[chan] = lambda cmd,data: dns_done(chan, mux, data)
+    expire_connections(now)
+
+
 def _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename, python, latency_control,
           dnslistener, method, seed_hosts, auto_nets,
           syslog, daemon):
@@ -318,141 +456,13 @@ def _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename, python, latency_c
                 fw.sethostip(name, ip)
     mux.got_host_list = onhostlist
 
-    dnsreqs = {}
-    udp_by_src = {}
-    def expire_connections(now):
-        for chan,(peer,sock,timeout) in dnsreqs.items():
-            if timeout < now:
-                debug3('expiring dnsreqs channel=%d peer=%r\n' % (chan, peer))
-                del mux.channels[chan]
-                del dnsreqs[chan]
-        debug3('Remaining DNS requests: %d\n' % len(dnsreqs))
-        for src,(chan,timeout) in udp_by_src.items():
-            if timeout < now:
-                debug3('expiring UDP channel channel=%d peer=%r\n' % (chan, peer))
-                mux.send(chan, ssnet.CMD_UDP_CLOSE, '')
-                del mux.channels[chan]
-                del udp_by_src[src]
-        debug3('Remaining UDP channels: %d\n' % len(udp_by_src))
+    tcp_listener.add_handler(handlers, onaccept_tcp, method, mux)
 
-    def onaccept_tcp(listener_sock):
-        global _extra_fd
-        try:
-            sock,srcip = listener_sock.accept()
-        except socket.error, e:
-            if e.args[0] in [errno.EMFILE, errno.ENFILE]:
-                debug1('Rejected incoming connection: too many open files!\n')
-                # free up an fd so we can eat the connection
-                os.close(_extra_fd)
-                try:
-                    sock,srcip = listener_sock.accept()
-                    sock.close()
-                finally:
-                    _extra_fd = os.open('/dev/null', os.O_RDONLY)
-                return
-            else:
-                raise
-        if method == "tproxy":
-            dstip = sock.getsockname();
-        else:
-            dstip = original_dst(sock)
-        debug1('Accept TCP: %s:%r -> %s:%r.\n' % (srcip[0],srcip[1],
-                                              dstip[0],dstip[1]))
-        if dstip[1] == sock.getsockname()[1] and islocal(dstip[0],sock.family):
-            debug1("-- ignored: that's my address!\n")
-            sock.close()
-            return
-        chan = mux.next_channel()
-        if not chan:
-            log('warning: too many open channels.  Discarded connection.\n')
-            sock.close()
-            return
-        mux.send(chan, ssnet.CMD_TCP_CONNECT, '%d,%s,%r' % (sock.family, dstip[0], dstip[1]))
-        outwrap = MuxWrapper(mux, chan)
-        handlers.append(Proxy(SockWrapper(sock, sock), outwrap))
-        expire_connections(time.time())
-    tcp_listener.add_handler(handlers, onaccept_tcp)
-
-    def udp_done(chan, data, family, dstip):
-        (src,srcport,data) = data.split(",",2)
-        srcip = (src,int(srcport))
-        debug3('doing send from %r port %d to %r port %d\n' % (srcip[0],srcip[1],dstip[0],dstip[1],))
-
-        sock = socket.socket(family, socket.SOCK_DGRAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
-        sock.bind(srcip)
-        sock.sendto(data, dstip)
-        sock.close()
-
-    def onaccept_udp(listener_sock):
-        srcip, data, adata, flags = listener_sock.recvmsg((4096,),socket.CMSG_SPACE(24))
-        now = time.time()
-        dstip = None
-        family = None
-        for a in adata:
-            if a.cmsg_level == socket.SOL_IP and a.cmsg_type == IP_ORIGDSTADDR:
-                family,port = struct.unpack('=HH', a.cmsg_data[0:4])
-                port = socket.htons(port)
-                if family == socket.AF_INET:
-                    start = 4
-                    length = 4
-                else:
-                    raise Fatal("Unsupported socket type '%s'"%family)
-                ip = socket.inet_ntop(family, a.cmsg_data[start:start+length])
-                dstip = (ip, port)
-                break
-            elif a.cmsg_level == SOL_IPV6 and a.cmsg_type == IPV6_ORIGDSTADDR:
-                family,port = struct.unpack('=HH', a.cmsg_data[0:4])
-                port = socket.htons(port)
-                if family == socket.AF_INET6:
-                    start = 8
-                    length = 16
-                else:
-                    raise Fatal("Unsupported socket type '%s'"%family)
-                ip = socket.inet_ntop(family, a.cmsg_data[start:start+length])
-                dstip = (ip, port)
-                break
-        if not dstip:
-            debug1("-- ignored UDP from %s:%r: couldn't determine destination IP address\n"%srcip)
-            return
-        debug1('Accept UDP: %s:%r -> %s:%r.\n' % (srcip[0],srcip[1],
-                                              dstip[0],dstip[1]))
-        if srcip in udp_by_src:
-            chan,timeout = udp_by_src[srcip]
-        else:
-            chan = mux.next_channel()
-            mux.channels[chan] = lambda cmd,data: udp_done(chan,data,family,dstip=srcip)
-            mux.send(chan, ssnet.CMD_UDP_OPEN, family)
-        udp_by_src[srcip] = chan,now+30
-
-        hdr = "%s,%r,"%(dstip[0], dstip[1])
-        mux.send(chan, ssnet.CMD_UDP_DATA, hdr+data[0])
-
-        expire_connections(now)
     if udp_listener:
-        udp_listener.add_handler(handlers, onaccept_udp)
+        udp_listener.add_handler(handlers, onaccept_udp, method, mux)
 
-    def dns_done(chan, data):
-        peer,sock,timeout = dnsreqs.get(chan) or (None,None,None)
-        debug3('dns_done: channel=%d peer=%r\n' % (chan, peer))
-        if peer:
-            del mux.channels[chan]
-            del dnsreqs[chan]
-            debug3('doing sendto %r\n' % (peer,))
-            sock.sendto(data, peer)
-    def ondns(listener_sock):
-        pkt,peer = listener_sock.recvfrom(4096)
-        now = time.time()
-        if pkt:
-            debug1('DNS request from %r: %d bytes\n' % (peer, len(pkt)))
-            chan = mux.next_channel()
-            dnsreqs[chan] = peer,listener_sock,now+30
-            mux.send(chan, ssnet.CMD_DNS_REQ, pkt)
-            mux.channels[chan] = lambda cmd,data: dns_done(chan,data)
-        expire_connections(now)
     if dnslistener:
-        dnslistener.add_handler(handlers, ondns)
+        dnslistener.add_handler(handlers, ondns, method, mux)
 
     if seed_hosts != None:
         debug1('seed_hosts: %r\n' % seed_hosts)
