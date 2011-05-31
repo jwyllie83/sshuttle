@@ -377,7 +377,7 @@ def ondns(listener, method, mux, handlers):
 
 
 def _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename, python, latency_control,
-          dnslistener, method, seed_hosts, auto_nets,
+          dns_listener, method, seed_hosts, auto_nets,
           syslog, daemon):
     handlers = []
     if helpers.verbose >= 1:
@@ -461,8 +461,8 @@ def _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename, python, latency_c
     if udp_listener:
         udp_listener.add_handler(handlers, onaccept_udp, method, mux)
 
-    if dnslistener:
-        dnslistener.add_handler(handlers, ondns, method, mux)
+    if dns_listener:
+        dns_listener.add_handler(handlers, ondns, method, mux)
 
     if seed_hosts != None:
         debug1('seed_hosts: %r\n' % seed_hosts)
@@ -583,8 +583,8 @@ def main(listenip_v6, listenip_v4,
         ports = xrange(12300,9000,-1)
         for port in ports:
             debug2(' %d' % port)
-            dnslistener = independent_listener(socket.SOCK_DGRAM)
-            dnslistener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            dns_listener = independent_listener(socket.SOCK_DGRAM)
+            dns_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
             if listenip_v6:
                 lv6 = (listenip_v6[0],port)
@@ -600,7 +600,7 @@ def main(listenip_v6, listenip_v4,
                 dnsport_v4 = 0
 
             try:
-                dnslistener.bind( lv6, lv4 )
+                dns_listener.bind( lv6, lv4 )
                 bound = True
                 break
             except socket.error, e:
@@ -609,20 +609,20 @@ def main(listenip_v6, listenip_v4,
                 else:
                     raise e
         debug2('\n')
-        dnslistener.print_listening("DNS")
+        dns_listener.print_listening("DNS")
         if not bound:
             assert(last_e)
             raise last_e
     else:
         dnsport_v6 = 0
         dnsport_v4 = 0
-        dnslistener = None
+        dns_listener = None
 
     fw = FirewallClient(redirectport_v6, redirectport_v4, subnets_include, subnets_exclude, dnsport_v6, dnsport_v4, method, udp)
     
     try:
         return _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename,
-                     python, latency_control, dnslistener,
+                     python, latency_control, dns_listener,
                      method, seed_hosts, auto_nets, syslog, 
                      daemon)
     finally:
