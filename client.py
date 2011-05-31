@@ -240,7 +240,7 @@ class FirewallClient:
 
 dnsreqs = {}
 udp_by_src = {}
-def expire_connections(now):
+def expire_connections(now, mux):
     for chan,(peer,sock,timeout) in dnsreqs.items():
         if timeout < now:
             debug3('expiring dnsreqs channel=%d peer=%r\n' % (chan, peer))
@@ -291,7 +291,7 @@ def onaccept_tcp(listener, method, mux, handlers):
     mux.send(chan, ssnet.CMD_TCP_CONNECT, '%d,%s,%r' % (sock.family, dstip[0], dstip[1]))
     outwrap = MuxWrapper(mux, chan)
     handlers.append(Proxy(SockWrapper(sock, sock), outwrap))
-    expire_connections(time.time())
+    expire_connections(time.time(), mux)
 
 
 def udp_done(chan, data, family, dstip):
@@ -351,7 +351,7 @@ def onaccept_udp(listener, method, mux, handlers):
     hdr = "%s,%r,"%(dstip[0], dstip[1])
     mux.send(chan, ssnet.CMD_UDP_DATA, hdr+data[0])
 
-    expire_connections(now)
+    expire_connections(now, mux)
 
 
 def dns_done(chan, mux, data):
@@ -373,7 +373,7 @@ def ondns(listener, method, mux, handlers):
         dnsreqs[chan] = peer,listener,now+30
         mux.send(chan, ssnet.CMD_DNS_REQ, pkt)
         mux.channels[chan] = lambda cmd,data: dns_done(chan, mux, data)
-    expire_connections(now)
+    expire_connections(now, mux)
 
 
 def _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename, python, latency_control,
