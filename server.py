@@ -197,6 +197,7 @@ def main():
     else:
         helpers.logprefix = 'server: '
     debug1('latency control setting = %r\n' % latency_control)
+
     routes = list(list_routes())
     debug1('available routes:\n')
     for r in routes:

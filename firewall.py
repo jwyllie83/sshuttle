@@ -52,7 +52,7 @@ def ipt(family, *args):
         ipt4(*args)
     else:
         raise Fatal("Unsupported family '%s'"%family_to_string(family))
-    
+
 
 _no_ttl_module = False
 def ipt_ttl(family, *args):
