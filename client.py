@@ -434,8 +434,8 @@ def _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename, python, latency_c
     def onroutes(routestr):
         if auto_nets:
             for line in routestr.strip().split('\n'):
-                (ip,width) = line.split(',', 1)
-                fw.auto_nets.append((ip,int(width)))
+                (family,ip,width) = line.split(',', 2)
+                fw.auto_nets.append((family,ip,int(width)))
 
         # we definitely want to do this *after* starting ssh, or we might end
         # up intercepting the ssh connection!
