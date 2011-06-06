@@ -563,7 +563,7 @@ def main(listenip_v6, listenip_v4,
             bound = True
             break
         except socket.error, e:
-            if e.errno == errno.EADDRNOTAVAIL:
+            if e.errno == errno.EADDRINUSE:
                 last_e = e
             else:
                 raise e
