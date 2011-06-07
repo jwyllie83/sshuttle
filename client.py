@@ -398,8 +398,8 @@ def onaccept_udp(listener, method, mux, handlers):
         chan,timeout = udp_by_src[srcip]
     else:
         chan = mux.next_channel()
-        mux.channels[chan] = lambda cmd,data: udp_done(chan,data,family,dstip=srcip)
-        mux.send(chan, ssnet.CMD_UDP_OPEN, family)
+        mux.channels[chan] = lambda cmd,data: udp_done(chan,data, listener.family, dstip=srcip)
+        mux.send(chan, ssnet.CMD_UDP_OPEN, listener.family)
     udp_by_src[srcip] = chan,now+30
 
     hdr = "%s,%r,"%(dstip[0], dstip[1])
