@@ -246,7 +246,7 @@ class FirewallClient:
                     ['-v'] * (helpers.verbose or 0) +
                     ['--firewall', str(port_v6), str(port_v4),
                                    str(dnsport_v6), str(dnsport_v4),
-                                   method, str(udp or 0)])
+                                   method, str(int(udp))])
         if ssyslog._p:
             argvbase += ['--syslog']
         argv_tries = [
