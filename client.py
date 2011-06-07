@@ -326,12 +326,12 @@ def expire_connections(now, mux):
             del mux.channels[chan]
             del dnsreqs[chan]
     debug3('Remaining DNS requests: %d\n' % len(dnsreqs))
-    for src,(chan,timeout) in udp_by_src.items():
+    for peer,(chan,timeout) in udp_by_src.items():
         if timeout < now:
             debug3('expiring UDP channel channel=%d peer=%r\n' % (chan, peer))
             mux.send(chan, ssnet.CMD_UDP_CLOSE, '')
             del mux.channels[chan]
-            del udp_by_src[src]
+            del udp_by_src[peer]
     debug3('Remaining UDP channels: %d\n' % len(udp_by_src))
 
 
