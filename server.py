@@ -271,9 +271,8 @@ def main():
         elif cmd == ssnet.CMD_UDP_CLOSE:
             debug2('is incoming UDP close\n')
             h = udphandlers[channel]
-            h.sock.close()
+            h.ok = False
             del mux.channels[channel]
-            del udphandlers[channel]
 
     def udp_open(channel, data):
         debug2('Incoming UDP open.\n')
@@ -306,5 +305,11 @@ def main():
                 if h.timeout < now or not h.ok:
                     debug3('expiring dnsreqs channel=%d\n' % channel)
                     del dnshandlers[channel]
+                    h.sock.close()
+                    h.ok = False
+            for channel,h in udphandlers.items():
+                if not h.ok:
+                    debug3('expiring UDP channel=%d\n' % channel)
+                    del udphandlers[channel]
                     h.sock.close()
                     h.ok = False
