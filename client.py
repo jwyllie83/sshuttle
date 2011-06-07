@@ -637,7 +637,6 @@ def main(listenip_v6, listenip_v4,
         for port in ports:
             debug2(' %d' % port)
             dns_listener = independent_listener(socket.SOCK_DGRAM)
-            dns_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
             if listenip_v6:
                 lv6 = (listenip_v6[0],port)
