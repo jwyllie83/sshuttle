@@ -261,14 +261,15 @@ def main():
 
     udphandlers = {}
     def udp_req(channel, cmd, data):
-        debug2('Incoming UDP request.\n')
+        debug2('Incoming UDP request channel=%d, cmd=%d\n' % (channel,cmd))
         if cmd == ssnet.CMD_UDP_DATA:
             (dstip,dstport,data) = data.split(",",2)
             dstport = int(dstport)
-            debug2('Incoming UDP request. %r %d.\n'%(dstip,dstport))
+            debug2('is incoming UDP data. %r %d.\n' % (dstip,dstport))
             h = udphandlers[channel]
             h.send((dstip,dstport),data)
         elif cmd == ssnet.CMD_UDP_CLOSE:
+            debug2('is incoming UDP close\n')
             h = udphandlers[channel]
             h.sock.close()
             del mux.channels[channel]
