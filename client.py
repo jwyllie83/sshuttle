@@ -320,9 +320,9 @@ class FirewallClient:
 dnsreqs = {}
 udp_by_src = {}
 def expire_connections(now, mux):
-    for chan,(peer,sock,timeout) in dnsreqs.items():
+    for chan,timeout in dnsreqs.items():
         if timeout < now:
-            debug3('expiring dnsreqs channel=%d peer=%r\n' % (chan, peer))
+            debug3('expiring dnsreqs channel=%d\n' % chan)
             del mux.channels[chan]
             del dnsreqs[chan]
     debug3('Remaining DNS requests: %d\n' % len(dnsreqs))
@@ -373,32 +373,31 @@ def onaccept_tcp(listener, method, mux, handlers):
     expire_connections(time.time(), mux)
 
 
-def udp_done(chan, data, family, dstip):
+def udp_done(chan, data, method, family, dstip):
     (src,srcport,data) = data.split(",",2)
     srcip = (src,int(srcport))
-    debug3('doing send from %r port %d to %r port %d\n' % (srcip[0],srcip[1],dstip[0],dstip[1],))
+    debug3('doing send from %r to %r\n' % (srcip,dstip,))
 
-    sock = socket.socket(family, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
-    sock.bind(srcip)
-    sock.sendto(data, dstip)
-    sock.close()
+    sender = socket.socket(sock.family, socket.SOCK_DGRAM)
+    sender.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sender.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
+    sender.bind(srcip)
+    sender.sendto(data, dstip)
+    sender.close()
 
 
 def onaccept_udp(listener, method, mux, handlers):
     now = time.time()
     srcip, dstip, data = recv_udp(listener, 4096)
     if not dstip:
-        debug1("-- ignored UDP from %s:%r: couldn't determine destination IP address\n"%srcip)
+        debug1("-- ignored UDP from %r: couldn't determine destination IP address\n" % (srcip,))
         return
-    debug1('Accept UDP: %s:%r -> %s:%r.\n' % (srcip[0],srcip[1],
-                                          dstip[0],dstip[1]))
+    debug1('Accept UDP: %r -> %r.\n' % (srcip,dstip,))
     if srcip in udp_by_src:
         chan,timeout = udp_by_src[srcip]
     else:
         chan = mux.next_channel()
-        mux.channels[chan] = lambda cmd,data: udp_done(chan,data, listener.family, dstip=srcip)
+        mux.channels[chan] = lambda cmd,data: udp_done(chan, data, method, listener, dstip=srcip)
         mux.send(chan, ssnet.CMD_UDP_OPEN, listener.family)
     udp_by_src[srcip] = chan,now+30
 
@@ -408,25 +407,34 @@ def onaccept_udp(listener, method, mux, handlers):
     expire_connections(now, mux)
 
 
-def dns_done(chan, mux, data):
-    peer,sock,timeout = dnsreqs.get(chan) or (None,None,None)
-    debug3('dns_done: channel=%d peer=%r\n' % (chan, peer))
-    if peer:
-        del mux.channels[chan]
-        del dnsreqs[chan]
-        debug3('doing sendto %r\n' % (peer,))
-        sock.sendto(data, peer)
+def dns_done(chan, data, method, sock, srcip, dstip, mux):
+    debug3('dns_done: channel=%d src=%r dst=%r\n' % (chan,srcip,dstip))
+    del mux.channels[chan]
+    del dnsreqs[chan]
+    if method == "tproxy":
+        debug3('doing send from %r to %r\n' % (srcip,dstip,))
+        sender = socket.socket(sock.family, socket.SOCK_DGRAM)
+        sender.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sender.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
+        sender.bind(srcip)
+        sender.sendto(data, dstip)
+        sender.close()
+    else:
+        debug3('doing sendto %r\n' % (dstip,))
+        sock.sendto(data, dstip)
 
 
 def ondns(listener, method, mux, handlers):
-    pkt,peer = listener.recvfrom(4096)
     now = time.time()
-    if pkt:
-        debug1('DNS request from %r: %d bytes\n' % (peer, len(pkt)))
-        chan = mux.next_channel()
-        dnsreqs[chan] = peer,listener,now+30
-        mux.send(chan, ssnet.CMD_DNS_REQ, pkt)
-        mux.channels[chan] = lambda cmd,data: dns_done(chan, mux, data)
+    srcip, dstip, data = recv_udp(listener, 4096)
+    if method == "tproxy" and not dstip:
+        debug1("-- ignored UDP from %r: couldn't determine destination IP address\n" % (srcip,))
+        return
+    debug1('DNS request from %r to %r: %d bytes\n' % (srcip,dstip,len(data)))
+    chan = mux.next_channel()
+    dnsreqs[chan] = now+30
+    mux.send(chan, ssnet.CMD_DNS_REQ, data)
+    mux.channels[chan] = lambda cmd,data: dns_done(chan, data, method, listener, srcip=dstip, dstip=srcip, mux=mux)
     expire_connections(now, mux)
 
 
@@ -548,6 +556,9 @@ def main(listenip_v6, listenip_v4,
             return 5
     debug1('Starting sshuttle proxy.\n')
 
+    if recvmsg is not None:
+        debug1("recvmsg %s support enabled.\n"%recvmsg)
+
     if method == "tproxy":
         if recvmsg is not None:
             debug1("tproxy UDP support enabled.\n")
@@ -555,6 +566,9 @@ def main(listenip_v6, listenip_v4,
         else:
             debug1("tproxy UDP support requires recvmsg function.\n")
             udp = False
+        if dns and recvmsg is None:
+            debug1("tproxy DNS support requires recvmsg function.\n")
+            dns = False
     else:
         debug1("UDP support requires tproxy; disabling UDP.\n")
         udp = False
@@ -637,6 +651,11 @@ def main(listenip_v6, listenip_v4,
         for port in ports:
             debug2(' %d' % port)
             dns_listener = independent_listener(socket.SOCK_DGRAM)
+
+            if method == "tproxy":
+                dns_listener.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
+                dns_listener.v4.setsockopt(socket.SOL_IP, IP_RECVORIGDSTADDR, 1)
+                dns_listener.v6.setsockopt(SOL_IPV6, IPV6_RECVORIGDSTADDR, 1)
 
             if listenip_v6:
                 lv6 = (listenip_v6[0],port)

@@ -153,7 +153,7 @@ def do_iptables_tproxy(port, dnsport, family, subnets, udp):
         ipt(family, table, '-F', divert_chain)
         ipt(family, table, '-X', divert_chain)
 
-    if subnets:
+    if subnets or dnsport:
         ipt(family, table, '-N', mark_chain)
         ipt(family, table, '-F', mark_chain)
         ipt(family, table, '-N', divert_chain)
@@ -170,8 +170,17 @@ def do_iptables_tproxy(port, dnsport, family, subnets, udp):
         ipt(family, table, '-A', tproxy_chain, '-m', 'socket', '-j', divert_chain,
              '-m', 'udp', '-p', 'udp')
 
-    #ipt(family, table, '-A', mark_chain, '-o', 'lo', '-j', 'RETURN')
- 
+    if dnsport:
+        nslist = resolvconf_nameservers()
+        for ip in filter(lambda i: guess_address_family(i)==family, nslist):
+            ipt(family, table, '-A', mark_chain, '-j', 'MARK', '--set-mark', '1',
+                '--dest', '%s/32' % ip,
+                '-m', 'udp', '-p', 'udp', '--dport', '53')
+            ipt(family, table, '-A', tproxy_chain, '-j', 'TPROXY', '--tproxy-mark', '0x1/0x1',
+                 '--dest', '%s/32' % ip,
+                 '-m', 'udp', '-p', 'udp', '--dport', '53',
+                 '--on-port', str(dnsport))
+
     if subnets:
         for f,swidth,sexclude,snet in sorted(subnets, key=lambda s: s[1], reverse=True):
             if sexclude:
