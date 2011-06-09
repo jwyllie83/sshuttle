@@ -118,7 +118,7 @@ def do_iptables_nat(port, dnsport, family, subnets, udp):
                         '--dest', '%s/%s' % (snet,swidth),
                         '-p', 'tcp',
                         '--to-ports', str(port))
-                
+
     if dnsport:
         nslist = resolvconf_nameservers()
         for ip in filter(lambda i: guess_address_family(i)==family, nslist):
@@ -127,6 +127,7 @@ def do_iptables_nat(port, dnsport, family, subnets, udp):
                     '-p', 'udp',
                     '--dport', '53',
                     '--to-ports', str(dnsport))
+
 
 def do_iptables_tproxy(port, dnsport, family, subnets, udp):
     if family not in [socket.AF_INET, socket.AF_INET6]:
@@ -204,7 +205,7 @@ def do_iptables_tproxy(port, dnsport, family, subnets, udp):
                      '--dest', '%s/%s' % (snet,swidth),
                      '-m', 'udp', '-p', 'udp',
                      '--on-port', str(port))
-                
+
 
 def ipfw_rule_exists(n):
     argv = ['ipfw', 'list']
