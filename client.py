@@ -198,11 +198,11 @@ class MultiListener:
         if self.v4:
             self.v4.setsockopt(level, optname, value)
 
-    def add_handler(self, handlers, handler, method, mux):
+    def add_handler(self, handlers, callback, method, mux):
         if self.v6:
-            handlers.append(Handler([self.v6], lambda: handler(self.v6, method, mux, handlers)))
+            handlers.append(Handler([self.v6], lambda: callback(self.v6, method, mux, handlers)))
         if self.v4:
-            handlers.append(Handler([self.v4], lambda: handler(self.v4, method, mux, handlers)))
+            handlers.append(Handler([self.v4], lambda: callback(self.v4, method, mux, handlers)))
 
     def listen(self, backlog):
         if self.v6:
