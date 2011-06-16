@@ -31,31 +31,21 @@ def ipt_chain_exists(family, table, name):
         raise Fatal('%r returned %d' % (argv, rv))
 
 
-def ipt4(table, *args):
-    argv = ['iptables', '-t', table] + list(args)
-    debug1('>> %s\n' % ' '.join(argv))
-    rv = ssubprocess.call(argv)
-    if rv:
-        raise Fatal('%r returned %d' % (argv, rv))
-
-def ipt6(table, *args):
-    argv = ['ip6tables', '-t', table] + list(args)
-    debug1('>> %s\n' % ' '.join(argv))
-    rv = ssubprocess.call(argv)
-    if rv:
-        raise Fatal('%r returned %d' % (argv, rv))
-
-def ipt(family, *args):
+def _ipt(family, table, *args):
     if family == socket.AF_INET6:
-        ipt6(*args)
+        argv = ['iptables', '-t', table] + list(args)
     elif family == socket.AF_INET:
-        ipt4(*args)
+        argv = ['ip6tables', '-t', table] + list(args)
     else:
         raise Fatal("Unsupported family '%s'"%family_to_string(family))
+    debug1('>> %s\n' % ' '.join(argv))
+    rv = ssubprocess.call(argv)
+    if rv:
+        raise Fatal('%r returned %d' % (argv, rv))
 
 
 _no_ttl_module = False
-def ipt_ttl(family, *args):
+def _ipt_ttl(family, *args):
     global _no_ttl_module
     if not _no_ttl_module:
         # we avoid infinite loops by generating server-side connections
@@ -63,15 +53,15 @@ def ipt_ttl(family, *args):
         # connections, in case client == server.
         try:
             argsplus = list(args) + ['-m', 'ttl', '!', '--ttl', '42']
-            ipt(family, *argsplus)
+            _ipt(family, *argsplus)
         except Fatal:
-            ipt(family, *args)
+            _ipt(family, *args)
             # we only get here if the non-ttl attempt succeeds
             log('sshuttle: warning: your iptables is missing '
                 'the ttl module.\n')
             _no_ttl_module = True
     else:
-        ipt(family, *args)
+        _ipt(family, *args)
 
 
 # We name the chain based on the transproxy port number so that it's possible
@@ -87,20 +77,25 @@ def do_iptables_nat(port, dnsport, family, subnets, udp):
         raise Fatal("UDP not supported by nat method")
 
     table = "nat"
+    def ipt(*args):
+        return _ipt(family, table, *args)
+    def ipt_ttl(*args):
+        return _ipt_ttl(family, table, *args)
+
     chain = 'sshuttle-%s' % port
 
     # basic cleanup/setup of chains
     if ipt_chain_exists(family, table, chain):
-        nonfatal(ipt, family, table, '-D', 'OUTPUT', '-j', chain)
-        nonfatal(ipt, family, table, '-D', 'PREROUTING', '-j', chain)
-        nonfatal(ipt, family, table, '-F', chain)
-        ipt(family, table, '-X', chain)
+        nonfatal(ipt, '-D', 'OUTPUT', '-j', chain)
+        nonfatal(ipt, '-D', 'PREROUTING', '-j', chain)
+        nonfatal(ipt, '-F', chain)
+        ipt('-X', chain)
 
     if subnets or dnsport:
-        ipt(family, table, '-N', chain)
-        ipt(family, table, '-F', chain)
-        ipt(family, table, '-I', 'OUTPUT', '1', '-j', chain)
-        ipt(family, table, '-I', 'PREROUTING', '1', '-j', chain)
+        ipt('-N', chain)
+        ipt('-F', chain)
+        ipt('-I', 'OUTPUT', '1', '-j', chain)
+        ipt('-I', 'PREROUTING', '1', '-j', chain)
 
     if subnets:
         # create new subnet entries.  Note that we're sorting in a very
@@ -110,11 +105,11 @@ def do_iptables_nat(port, dnsport, family, subnets, udp):
         # intuitive order.
         for f,swidth,sexclude,snet in sorted(subnets, key=lambda s: s[1], reverse=True):
             if sexclude:
-                ipt(family, table, '-A', chain, '-j', 'RETURN',
+                ipt('-A', chain, '-j', 'RETURN',
                     '--dest', '%s/%s' % (snet,swidth),
                     '-p', 'tcp')
             else:
-                ipt_ttl(family, table, '-A', chain, '-j', 'REDIRECT',
+                ipt_ttl('-A', chain, '-j', 'REDIRECT',
                         '--dest', '%s/%s' % (snet,swidth),
                         '-p', 'tcp',
                         '--to-ports', str(port))
@@ -122,7 +117,7 @@ def do_iptables_nat(port, dnsport, family, subnets, udp):
     if dnsport:
         nslist = resolvconf_nameservers()
         for ip in filter(lambda i: guess_address_family(i)==family, nslist):
-            ipt_ttl(family, table, '-A', chain, '-j', 'REDIRECT',
+            ipt_ttl('-A', chain, '-j', 'REDIRECT',
                     '--dest', '%s/32' % ip,
                     '-p', 'udp',
                     '--dport', '53',
@@ -134,37 +129,42 @@ def do_iptables_tproxy(port, dnsport, family, subnets, udp):
         raise Fatal("Address family '%s' unsupported by tproxy method"%family_to_string(family))
 
     table = "mangle"
+    def ipt(*args):
+        return _ipt(family, table, *args)
+    def ipt_ttl(*args):
+        return _ipt_ttl(family, table, *args)
+
     mark_chain   = 'sshuttle-m-%s' % port
     tproxy_chain = 'sshuttle-t-%s' % port
     divert_chain = 'sshuttle-d-%s' % port
 
     # basic cleanup/setup of chains
     if ipt_chain_exists(family, table, mark_chain):
-        ipt(family, table, '-D', 'OUTPUT', '-j', mark_chain)
-        ipt(family, table, '-F', mark_chain)
-        ipt(family, table, '-X', mark_chain)
+        ipt('-D', 'OUTPUT', '-j', mark_chain)
+        ipt('-F', mark_chain)
+        ipt('-X', mark_chain)
 
     if ipt_chain_exists(family, table, tproxy_chain):
-        ipt(family, table, '-D', 'PREROUTING', '-j', tproxy_chain)
-        ipt(family, table, '-F', tproxy_chain)
-        ipt(family, table, '-X', tproxy_chain)
+        ipt('-D', 'PREROUTING', '-j', tproxy_chain)
+        ipt('-F', tproxy_chain)
+        ipt('-X', tproxy_chain)
 
     if ipt_chain_exists(family, table, divert_chain):
-        ipt(family, table, '-F', divert_chain)
-        ipt(family, table, '-X', divert_chain)
+        ipt('-F', divert_chain)
+        ipt('-X', divert_chain)
 
     if subnets or dnsport:
-        ipt(family, table, '-N', mark_chain)
-        ipt(family, table, '-F', mark_chain)
-        ipt(family, table, '-N', divert_chain)
-        ipt(family, table, '-F', divert_chain)
-        ipt(family, table, '-N', tproxy_chain)
-        ipt(family, table, '-F', tproxy_chain)
-        ipt(family, table, '-I', 'OUTPUT', '1', '-j', mark_chain)
-        ipt(family, table, '-I', 'PREROUTING', '1', '-j', tproxy_chain)
-        ipt(family, table, '-A', divert_chain, '-j', 'MARK', '--set-mark', '1')
-        ipt(family, table, '-A', divert_chain, '-j', 'ACCEPT')
-        ipt(family, table, '-A', tproxy_chain, '-m', 'socket', '-j', divert_chain,
+        ipt('-N', mark_chain)
+        ipt('-F', mark_chain)
+        ipt('-N', divert_chain)
+        ipt('-F', divert_chain)
+        ipt('-N', tproxy_chain)
+        ipt('-F', tproxy_chain)
+        ipt('-I', 'OUTPUT', '1', '-j', mark_chain)
+        ipt('-I', 'PREROUTING', '1', '-j', tproxy_chain)
+        ipt('-A', divert_chain, '-j', 'MARK', '--set-mark', '1')
+        ipt('-A', divert_chain, '-j', 'ACCEPT')
+        ipt('-A', tproxy_chain, '-m', 'socket', '-j', divert_chain,
              '-m', 'tcp', '-p', 'tcp')
     if subnets and udp:
         ipt(family, table, '-A', tproxy_chain, '-m', 'socket', '-j', divert_chain,
@@ -173,10 +173,10 @@ def do_iptables_tproxy(port, dnsport, family, subnets, udp):
     if dnsport:
         nslist = resolvconf_nameservers()
         for ip in filter(lambda i: guess_address_family(i)==family, nslist):
-            ipt(family, table, '-A', mark_chain, '-j', 'MARK', '--set-mark', '1',
+            ipt('-A', mark_chain, '-j', 'MARK', '--set-mark', '1',
                 '--dest', '%s/32' % ip,
                 '-m', 'udp', '-p', 'udp', '--dport', '53')
-            ipt(family, table, '-A', tproxy_chain, '-j', 'TPROXY', '--tproxy-mark', '0x1/0x1',
+            ipt('-A', tproxy_chain, '-j', 'TPROXY', '--tproxy-mark', '0x1/0x1',
                  '--dest', '%s/32' % ip,
                  '-m', 'udp', '-p', 'udp', '--dport', '53',
                  '--on-port', str(dnsport))
@@ -184,33 +184,33 @@ def do_iptables_tproxy(port, dnsport, family, subnets, udp):
     if subnets:
         for f,swidth,sexclude,snet in sorted(subnets, key=lambda s: s[1], reverse=True):
             if sexclude:
-                ipt(family, table, '-A', mark_chain, '-j', 'RETURN',
+                ipt('-A', mark_chain, '-j', 'RETURN',
                     '--dest', '%s/%s' % (snet,swidth),
                     '-m', 'tcp', '-p', 'tcp')
-                ipt(family, table, '-A', tproxy_chain, '-j', 'RETURN',
+                ipt('-A', tproxy_chain, '-j', 'RETURN',
                     '--dest', '%s/%s' % (snet,swidth),
                     '-m', 'tcp', '-p', 'tcp')
             else:
-                ipt(family, table, '-A', mark_chain, '-j', 'MARK', '--set-mark', '1',
+                ipt('-A', mark_chain, '-j', 'MARK', '--set-mark', '1',
                      '--dest', '%s/%s' % (snet,swidth),
                      '-m', 'tcp', '-p', 'tcp')
-                ipt(family, table, '-A', tproxy_chain, '-j', 'TPROXY', '--tproxy-mark', '0x1/0x1',
+                ipt('-A', tproxy_chain, '-j', 'TPROXY', '--tproxy-mark', '0x1/0x1',
                      '--dest', '%s/%s' % (snet,swidth),
                      '-m', 'tcp', '-p', 'tcp',
                      '--on-port', str(port))
 
             if sexclude and udp:
-                ipt(family, table, '-A', mark_chain, '-j', 'RETURN',
+                ipt('-A', mark_chain, '-j', 'RETURN',
                     '--dest', '%s/%s' % (snet,swidth),
                     '-m', 'udp', '-p', 'udp')
-                ipt(family, table, '-A', tproxy_chain, '-j', 'RETURN',
+                ipt('-A', tproxy_chain, '-j', 'RETURN',
                     '--dest', '%s/%s' % (snet,swidth),
                     '-m', 'udp', '-p', 'udp')
             elif udp:
-                ipt(family, table, '-A', mark_chain, '-j', 'MARK', '--set-mark', '1',
+                ipt('-A', mark_chain, '-j', 'MARK', '--set-mark', '1',
                      '--dest', '%s/%s' % (snet,swidth),
                      '-m', 'udp', '-p', 'udp')
-                ipt(family, table, '-A', tproxy_chain, '-j', 'TPROXY', '--tproxy-mark', '0x1/0x1',
+                ipt('-A', tproxy_chain, '-j', 'TPROXY', '--tproxy-mark', '0x1/0x1',
                      '--dest', '%s/%s' % (snet,swidth),
                      '-m', 'udp', '-p', 'udp',
                      '--on-port', str(port))
