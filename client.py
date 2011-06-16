@@ -186,7 +186,7 @@ def original_dst(sock):
         raise
 
 
-class independent_listener:
+class MultiListener:
 
     def __init__(self, type=socket.SOCK_STREAM, proto=0):
         self.v6 = socket.socket(socket.AF_INET6, type, proto)
@@ -588,14 +588,14 @@ def main(listenip_v6, listenip_v4,
     debug2('Binding redirector:')
     for port in ports:
         debug2(' %d' % port)
-        tcp_listener = independent_listener()
+        tcp_listener = MultiListener()
         tcp_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
         if method == "tproxy":
             tcp_listener.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
 
         if udp:
-            udp_listener = independent_listener(socket.SOCK_DGRAM)
+            udp_listener = MultiListener(socket.SOCK_DGRAM)
             udp_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             udp_listener.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
             udp_listener.v4.setsockopt(socket.SOL_IP, IP_RECVORIGDSTADDR, 1)
@@ -650,7 +650,7 @@ def main(listenip_v6, listenip_v4,
         ports = xrange(12300,9000,-1)
         for port in ports:
             debug2(' %d' % port)
-            dns_listener = independent_listener(socket.SOCK_DGRAM)
+            dns_listener = MultiListener(socket.SOCK_DGRAM)
 
             if method == "tproxy":
                 dns_listener.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
