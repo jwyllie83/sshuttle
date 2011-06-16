@@ -231,10 +231,11 @@ class MultiListener:
     def print_listening(self, what):
         if self.v6:
             listenip = self.v6.getsockname()
-            debug1('%s listening on %r.\n' % (what, listenip, ))
+            debug1('%s listening on %r.\n' % (what, listenip))
         if self.v4:
             listenip = self.v4.getsockname()
-            debug1('%s listening on %r.\n' % (what, listenip, ))
+            debug1('%s listening on %r.\n' % (what, listenip))
+
 
 class FirewallClient:
     def __init__(self, port_v6, port_v4, subnets_include, subnets_exclude, dnsport_v6, dnsport_v4, method, udp):
