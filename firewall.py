@@ -33,9 +33,9 @@ def ipt_chain_exists(family, table, name):
 
 def _ipt(family, table, *args):
     if family == socket.AF_INET6:
-        argv = ['iptables', '-t', table] + list(args)
-    elif family == socket.AF_INET:
         argv = ['ip6tables', '-t', table] + list(args)
+    elif family == socket.AF_INET:
+        argv = ['iptables', '-t', table] + list(args)
     else:
         raise Fatal("Unsupported family '%s'"%family_to_string(family))
     debug1('>> %s\n' % ' '.join(argv))
