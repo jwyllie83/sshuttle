@@ -167,7 +167,7 @@ def do_iptables_tproxy(port, dnsport, family, subnets, udp):
         ipt('-A', tproxy_chain, '-m', 'socket', '-j', divert_chain,
              '-m', 'tcp', '-p', 'tcp')
     if subnets and udp:
-        ipt(family, table, '-A', tproxy_chain, '-m', 'socket', '-j', divert_chain,
+        ipt('-A', tproxy_chain, '-m', 'socket', '-j', divert_chain,
              '-m', 'udp', '-p', 'udp')
 
     if dnsport:
