@@ -242,7 +242,6 @@ class FirewallClient:
         self.auto_nets = []
         self.subnets_include = subnets_include
         self.subnets_exclude = subnets_exclude
-        self.method = method
         argvbase = ([sys.argv[1], sys.argv[0], sys.argv[1]] +
                     ['-v'] * (helpers.verbose or 0) +
                     ['--firewall', str(port_v6), str(port_v4),
@@ -284,8 +283,9 @@ class FirewallClient:
             raise Fatal(e)
         line = self.pfile.readline()
         self.check()
-        if line != 'READY\n':
+        if line[0:5] != 'READY':
             raise Fatal('%r expected READY, got %r' % (self.argv, line))
+        self.method = line[6:-1]
 
     def check(self):
         rv = self.p.poll()
@@ -592,15 +592,9 @@ def main(listenip_v6, listenip_v4,
         tcp_listener = MultiListener()
         tcp_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-        if method == "tproxy":
-            tcp_listener.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
-
         if udp:
             udp_listener = MultiListener(socket.SOCK_DGRAM)
             udp_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            udp_listener.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
-            udp_listener.v4.setsockopt(socket.SOL_IP, IP_RECVORIGDSTADDR, 1)
-            udp_listener.v6.setsockopt(SOL_IPV6, IPV6_RECVORIGDSTADDR, 1)
         else:
             udp_listener = None
 
@@ -653,11 +647,6 @@ def main(listenip_v6, listenip_v4,
             debug2(' %d' % port)
             dns_listener = MultiListener(socket.SOCK_DGRAM)
 
-            if method == "tproxy":
-                dns_listener.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
-                dns_listener.v4.setsockopt(socket.SOL_IP, IP_RECVORIGDSTADDR, 1)
-                dns_listener.v6.setsockopt(SOL_IPV6, IPV6_RECVORIGDSTADDR, 1)
-
             if listenip_v6:
                 lv6 = (listenip_v6[0],port)
                 dnsport_v6 = port
@@ -691,11 +680,22 @@ def main(listenip_v6, listenip_v4,
         dns_listener = None
 
     fw = FirewallClient(redirectport_v6, redirectport_v4, subnets_include, subnets_exclude, dnsport_v6, dnsport_v4, method, udp)
-    
+
+    if fw.method == "tproxy":
+        tcp_listener.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
+        if udp_listener:
+            udp_listener.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
+            udp_listener.v4.setsockopt(socket.SOL_IP, IP_RECVORIGDSTADDR, 1)
+            udp_listener.v6.setsockopt(SOL_IPV6, IPV6_RECVORIGDSTADDR, 1)
+        if dns_listener:
+            dns_listener.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
+            dns_listener.v4.setsockopt(socket.SOL_IP, IP_RECVORIGDSTADDR, 1)
+            dns_listener.v6.setsockopt(SOL_IPV6, IPV6_RECVORIGDSTADDR, 1)
+
     try:
         return _main(tcp_listener, udp_listener, fw, ssh_cmd, remotename,
                      python, latency_control, dns_listener,
-                     method, seed_hosts, auto_nets, syslog, 
+                     fw.method, seed_hosts, auto_nets, syslog,
                      daemon)
     finally:
         try:

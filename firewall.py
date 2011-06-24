@@ -504,12 +504,13 @@ def main(port_v6, port_v4, dnsport_v6, dnsport_v4, method, udp, syslog):
 
     if method == "auto":
         if program_exists('ipfw'):
-            do_it = do_ipfw
+            method = "ipfw"
         elif program_exists('iptables'):
-            do_it = do_iptables_nat
+            method = "nat"
         else:
             raise Fatal("can't find either ipfw or iptables; check your PATH")
-    elif method == "nat":
+
+    if method == "nat":
         do_it = do_iptables_nat
     elif method == "tproxy":
         do_it = do_iptables_tproxy
@@ -527,8 +528,8 @@ def main(port_v6, port_v4, dnsport_v6, dnsport_v4, method, udp, syslog):
         ssyslog.start_syslog()
         ssyslog.stderr_to_syslog()
 
-    debug1('firewall manager ready.\n')
-    sys.stdout.write('READY\n')
+    debug1('firewall manager ready method %s.\n'%method)
+    sys.stdout.write('READY %s\n'%method)
     sys.stdout.flush()
 
     # ctrl-c shouldn't be passed along to me.  When the main sshuttle dies,
