@@ -20,7 +20,7 @@ def ipt_chain_exists(family, table, name):
     elif family == socket.AF_INET:
         cmd = 'iptables'
     else:
-        raise Fatal("Unsupported family '%s'"%family_to_string(family))
+        raise Exception('Unsupported family "%s"'%family_to_string(family))
     argv = [cmd, '-t', table, '-nL']
     p = ssubprocess.Popen(argv, stdout = ssubprocess.PIPE)
     for line in p.stdout:
@@ -37,7 +37,7 @@ def _ipt(family, table, *args):
     elif family == socket.AF_INET:
         argv = ['iptables', '-t', table] + list(args)
     else:
-        raise Fatal("Unsupported family '%s'"%family_to_string(family))
+        raise Exception('Unsupported family "%s"'%family_to_string(family))
     debug1('>> %s\n' % ' '.join(argv))
     rv = ssubprocess.call(argv)
     if rv:
@@ -71,10 +71,10 @@ def _ipt_ttl(family, *args):
 # "-A OUTPUT").
 def do_iptables_nat(port, dnsport, family, subnets, udp):
     # only ipv4 supported with NAT
-    if family not in [socket.AF_INET, ]:
-        raise Fatal("Address family '%s' unsupported by nat method"%family_to_string(family))
+    if family != socket.AF_INET:
+        raise Exception('Address family "%s" unsupported by nat method'%family_to_string(family))
     if udp:
-        raise Fatal("UDP not supported by nat method")
+        raise Exception("UDP not supported by nat method")
 
     table = "nat"
     def ipt(*args):
@@ -126,7 +126,7 @@ def do_iptables_nat(port, dnsport, family, subnets, udp):
 
 def do_iptables_tproxy(port, dnsport, family, subnets, udp):
     if family not in [socket.AF_INET, socket.AF_INET6]:
-        raise Fatal("Address family '%s' unsupported by tproxy method"%family_to_string(family))
+        raise Exception('Address family "%s" unsupported by tproxy method'%family_to_string(family))
 
     table = "mangle"
     def ipt(*args):
@@ -324,9 +324,9 @@ def ipfw(*args):
 def do_ipfw(port, dnsport, family, subnets, udp):
     # IPv6 not supported
     if family not in [socket.AF_INET, ]:
-        raise Fatal("Address family '%s' unsupported by ipfw method"%family_to_string(family))
+        raise Exception('Address family "%s" unsupported by ipfw method'%family_to_string(family))
     if udp:
-        raise Fatal("UDP not supported by ipfw method")
+        raise Exception("UDP not supported by ipfw method")
 
     sport = str(port)
     xsport = str(port+1)
@@ -517,7 +517,7 @@ def main(port_v6, port_v4, dnsport_v6, dnsport_v4, method, udp, syslog):
     elif method == "ipfw":
         do_it = do_ipfw
     else:
-        raise Fatal("Unknown method '%s'"%method)
+        raise Fatal('Unknown method "%s"'%method)
 
     # because of limitations of the 'su' command, the *real* stdin/stdout
     # are both attached to stdout initially.  Clone stdout into stdin so we
