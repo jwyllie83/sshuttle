@@ -4,6 +4,7 @@ import compat.ssubprocess as ssubprocess
 from helpers import *
 
 
+# 1.2.3.4/5 or just 1.2.3.4
 def parse_subnet4(s):
     m = re.match(r'(\d+)(?:\.(\d+)\.(\d+)\.(\d+))?(?:/(\d+))?$', s)
     if not m:
@@ -20,6 +21,8 @@ def parse_subnet4(s):
         raise Fatal('*/%d is greater than the maximum of 32' % width)
     return(socket.AF_INET, '%d.%d.%d.%d' % (a,b,c,d), width)
 
+
+# 1:2::3/64 or just 1:2::3
 def parse_subnet6(s):
     m = re.match(r'(?:([a-fA-F\d:]+))?(?:/(\d+))?$', s)
     if not m:
@@ -33,6 +36,7 @@ def parse_subnet6(s):
         raise Fatal('*/%d is greater than the maximum of 128' % width)
     return(socket.AF_INET6, net, width)
 
+
 # list of:
 # 1.2.3.4/5 or just 1.2.3.4
 # 1:2::3/64 or just 1:2::3
@@ -45,6 +49,7 @@ def parse_subnets(subnets_str):
             subnet = parse_subnet4(s)
         subnets.append(subnet)
     return subnets
+
 
 # 1.2.3.4:567 or just 1.2.3.4 or just 567
 def parse_ipport4(s):
@@ -63,8 +68,8 @@ def parse_ipport4(s):
         a = b = c = d = 0
     return ('%d.%d.%d.%d' % (a,b,c,d), port)
 
-# [1:2::3]:456 or [1:2::3] or 456
 
+# [1:2::3]:456 or [1:2::3] or 456
 def parse_ipport6(s):
     s = str(s)
     m = re.match(r'(?:\[([^]]*)])?(?::)?(?:(\d+))?$', s)
@@ -73,6 +78,7 @@ def parse_ipport6(s):
     (ip,port) = m.groups()
     (ip,port) = (ip or '::', int(port or 0))
     return (ip, port)
+
 
 optspec = """
 sshuttle [-l [ip:]port] [-r [username@]sshserver[:port]] <subnets...>
@@ -115,7 +121,6 @@ try:
         if len(extra) != 0:
             o.fatal('no arguments expected')
         server.latency_control = opt.latency_control
-        server.method = opt.method
         sys.exit(server.main())
     elif opt.firewall:
         if len(extra) != 6:

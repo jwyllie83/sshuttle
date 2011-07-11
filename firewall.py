@@ -517,7 +517,7 @@ def main(port_v6, port_v4, dnsport_v6, dnsport_v4, method, udp, syslog):
     elif method == "ipfw":
         do_it = do_ipfw
     else:
-        raise Fatal('Unknown method "%s"'%method)
+        raise Exception('Unknown method "%s"'%method)
 
     # because of limitations of the 'su' command, the *real* stdin/stdout
     # are both attached to stdout initially.  Clone stdout into stdin so we
@@ -572,7 +572,7 @@ def main(port_v6, port_v4, dnsport_v6, dnsport_v4, method, udp, syslog):
             if port_v4:
                 do_wait = do_it(port_v4, dnsport_v4, socket.AF_INET, subnets_v4, udp)
             elif len(subnets_v4) > 0:
-                debug1("IPv4 subnets defined but IPv4 disabled\n")
+                debug1('IPv4 subnets defined but IPv4 disabled\n')
 
             sys.stdout.write('STARTED\n')
         

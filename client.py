@@ -36,6 +36,7 @@ SOL_IPV6 = 41
 IPV6_ORIGDSTADDR = 74
 IPV6_RECVORIGDSTADDR = IPV6_ORIGDSTADDR
 
+
 if recvmsg == "python":
     def recv_udp(listener, bufsize):
         debug3('Accept UDP python using recvmsg.\n')
@@ -101,6 +102,7 @@ else:
         debug3('Accept UDP using recvfrom.\n')
         data, srcip = listener.recvfrom(bufsize)
         return (srcip, None, data)
+
 
 def check_daemon(pidfile):
     global _pidname
@@ -653,6 +655,7 @@ def main(listenip_v6, listenip_v4,
             else:
                 lv6 = None
                 dnsport_v6 = 0
+
             if listenip_v4:
                 lv4 = (listenip_v4[0],port)
                 dnsport_v4 = port
