@@ -96,7 +96,7 @@ elif recvmsg == "socket_ext":
                 ip = socket.inet_ntop(family, a.cmsg_data[start:start+length])
                 dstip = (ip, port)
                 break
-        return (srcip, dstip, data)
+        return (srcip, dstip, data[0])
 else:
     def recv_udp(listener, bufsize):
         debug3('Accept UDP using recvfrom.\n')
@@ -381,7 +381,7 @@ def udp_done(chan, data, method, family, dstip):
     srcip = (src,int(srcport))
     debug3('doing send from %r to %r\n' % (srcip,dstip,))
 
-    sender = socket.socket(sock.family, socket.SOCK_DGRAM)
+    sender = socket.socket(family, socket.SOCK_DGRAM)
     sender.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sender.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
     sender.bind(srcip)
@@ -400,12 +400,12 @@ def onaccept_udp(listener, method, mux, handlers):
         chan,timeout = udp_by_src[srcip]
     else:
         chan = mux.next_channel()
-        mux.channels[chan] = lambda cmd,data: udp_done(chan, data, method, listener, dstip=srcip)
+        mux.channels[chan] = lambda cmd,data: udp_done(chan, data, method, listener.family, dstip=srcip)
         mux.send(chan, ssnet.CMD_UDP_OPEN, listener.family)
     udp_by_src[srcip] = chan,now+30
 
     hdr = "%s,%r,"%(dstip[0], dstip[1])
-    mux.send(chan, ssnet.CMD_UDP_DATA, hdr+data[0])
+    mux.send(chan, ssnet.CMD_UDP_DATA, hdr+data)
 
     expire_connections(now, mux)
 
