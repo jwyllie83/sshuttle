@@ -381,12 +381,15 @@ def udp_done(chan, data, method, family, dstip):
     srcip = (src,int(srcport))
     debug3('doing send from %r to %r\n' % (srcip,dstip,))
 
-    sender = socket.socket(family, socket.SOCK_DGRAM)
-    sender.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sender.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
-    sender.bind(srcip)
-    sender.sendto(data, dstip)
-    sender.close()
+    try:
+        sender = socket.socket(family, socket.SOCK_DGRAM)
+        sender.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sender.setsockopt(socket.SOL_IP, IP_TRANSPARENT, 1)
+        sender.bind(srcip)
+        sender.sendto(data, dstip)
+        sender.close()
+    except socket.error, e:
+        debug1('-- ignored socket error sending UDP data: %r\n'%e)
 
 
 def onaccept_udp(listener, method, mux, handlers):
