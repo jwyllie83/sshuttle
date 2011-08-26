@@ -116,7 +116,7 @@ def do_iptables_nat(port, dnsport, family, subnets, udp):
 
     if dnsport:
         nslist = resolvconf_nameservers()
-        for ip in filter(lambda i: guess_address_family(i)==family, nslist):
+        for f,ip in filter(lambda i: i[0]==family, nslist):
             ipt_ttl('-A', chain, '-j', 'REDIRECT',
                     '--dest', '%s/32' % ip,
                     '-p', 'udp',
@@ -172,7 +172,7 @@ def do_iptables_tproxy(port, dnsport, family, subnets, udp):
 
     if dnsport:
         nslist = resolvconf_nameservers()
-        for ip in filter(lambda i: guess_address_family(i)==family, nslist):
+        for f,ip in filter(lambda i: i[0]==family, nslist):
             ipt('-A', mark_chain, '-j', 'MARK', '--set-mark', '1',
                 '--dest', '%s/32' % ip,
                 '-m', 'udp', '-p', 'udp', '--dport', '53')
@@ -406,7 +406,7 @@ def do_ipfw(port, dnsport, family, subnets, udp):
         divertsock.bind(('0.0.0.0', port)) # IP field is ignored
 
         nslist = resolvconf_nameservers()
-        for ip in nslist:
+        for f,ip in filter(lambda i: i[0]==family, nslist):
             # relabel and then catch outgoing DNS requests
             ipfw('add', sport, 'divert', sport,
                  'log', 'udp',

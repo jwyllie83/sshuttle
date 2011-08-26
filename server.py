@@ -126,7 +126,8 @@ class DnsProxy(Handler):
         if self.tries >= 3:
             return
         self.tries += 1
-        self.peer = resolvconf_random_nameserver()
+        # FIXME! Support IPv6 nameservers
+        self.peer = resolvconf_random_nameserver()[1]
         self.sock.connect((self.peer, 53))
         debug2('DNS: sending to %r\n' % self.peer)
         try:
