@@ -1,6 +1,6 @@
 Package: sshuttle
-Version: 0.2
-Architecture: i386
+Version: 0.6
+Architecture: amd64
 Maintainer: Jim Wyllie <jwyllie83@gmail.com>
 Depends: autossh, upstart, python (>=2.6)
 Section: utils
