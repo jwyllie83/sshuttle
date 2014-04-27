@@ -28,6 +28,9 @@ cp tunnel.conf ${B}/etc/sshuttle
 # Copy the control file over, as well
 cp control ${B}/DEBIAN
 
+# Delete out any .pyc files; not guaranteed to work here
+find ${B} -type f -name '*.pyc' | xargs rm -f
+
 # Create the md5sum manifest
 if [ -x /usr/bin/md5sum ]; then
 	cd ${B}
