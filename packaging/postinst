@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+
+cd /etc/sshuttle
+# Create the .conf files in /etc/sshuttle if they don't exist
+for F in tunnel prefixes; do
+	if [ ! -e ${F}.conf ]; then
+		ln -s ${F}.conf.dist ${F}.conf
+	fi
+done
