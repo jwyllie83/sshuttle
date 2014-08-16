@@ -96,7 +96,7 @@ class SockWrapper:
     def __init__(self, rsock, wsock, connect_to=None, peername=None):
         global _swcount
         _swcount += 1
-        debug3('creating new SockWrapper (%d now exist)\n' % _swcount)
+        log('creating new SockWrapper (%d now exist)\n' % _swcount)
         self.exc = None
         self.rsock = rsock
         self.wsock = wsock
