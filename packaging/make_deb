@@ -25,8 +25,9 @@ cp -r sshuttle.conf ${B}/etc/init
 cp prefixes.conf.dist ${B}/etc/sshuttle
 cp tunnel.conf.dist ${B}/etc/sshuttle
 
-# Copy the control file over, as well
+# Copy the control files over, as well
 cp control ${B}/DEBIAN
+cp postinst ${B}/DEBIAN
 
 # Delete out any .pyc files; not guaranteed to work here
 find ${B} -type f -name '*.pyc' | xargs rm -f
