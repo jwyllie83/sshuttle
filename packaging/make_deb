@@ -5,17 +5,24 @@
 
 B="/tmp/sshuttle/build"
 
+# Make sure we're in the current working directory, as some things require it
+if [ ! -x "./$(basename "$0")" ]; then
+	echo 'Unable to build: need to be in the packaging directory of sshuttle where this script lives' > /dev/stderr
+	exit 1
+fi
+
 if [ ! -x /usr/bin/dpkg ]; then
-	echo 'Unable to build: dpkg not found on system'
+	echo 'Unable to build: dpkg not found on system' > /dev/stderr
 	exit 1
 fi
 
 # Create the new directory structure
 mkdir -p ${B}/etc/sshuttle/pre-start.d
 mkdir -p ${B}/etc/sshuttle/post-stop.d
-mkdir -p ${B}/usr/share/sshuttle
+mkdir -p ${B}/usr/share/sshuttle/scripts
 mkdir -p ${B}/usr/bin
-mkdir -p ${B}/etc/init
+mkdir -p ${B}/lib/systemd/system
+mkdir -p ${B}/etc/systemd/system
 mkdir -p ${B}/DEBIAN
 
 # Copy over all of the files
@@ -24,6 +31,11 @@ cp ../src/sshuttle ${B}/usr/bin
 cp -r sshuttle.conf ${B}/etc/init
 cp prefixes.conf.dist ${B}/etc/sshuttle
 cp tunnel.conf.dist ${B}/etc/sshuttle
+
+# Copy over all of the scripts / installers
+cp sshuttle-pre-start.sh ${B}/usr/share/sshuttle/scripts
+cp sshuttle-post-stop.sh ${B}/usr/share/sshuttle/scripts
+cp sshuttle.service ${B}/lib/systemd/system
 
 # Copy the control files over, as well
 cp control ${B}/DEBIAN

@@ -1,0 +1,35 @@
+# Good guide to Systemd and what this all means:
+# https://www.digitalocean.com/community/tutorials/understanding-systemd-units-and-unit-files
+# I found this guide helpful for the line-to-line conversion:
+# https://wiki.ubuntu.com/SystemdForUpstartUsers
+
+[Unit]
+Description=sshuttle SSH VPN
+Documentation=https://github.com/jwyllie83/sshuttle
+After=network-online.target
+
+[Service]
+Type=forking
+
+# Set the environment needed for the start and stop scripts
+Environment=PREFIX_LOCATION=/etc/sshuttle/prefixes.conf
+Environment=ROUTE_TABLE=100
+Environment=FWMARK=1
+Environment=SSHUTTLE_TUNNEL_FILE=/etc/sshuttle/tunnel.conf
+Environment=TUNNEL_PROXY=/etc/sshuttle/tunnel.conf
+Environment=MISC_START_DIR=/etc/sshuttle/pre-start.d
+Environment=MISC_STOP_DIR=/etc/sshuttle/post-stop.d
+
+# Miscellaneous commands
+PIDFile=/var/run/sshuttle.pid
+
+# Set up the execution environment
+ExecStartPre=/usr/share/sshuttle/scripts/sshuttle-pre-start.sh
+ExecStopPost=/usr/share/sshuttle/scripts/sshuttle-post-stop.sh
+
+# Commands to do the heavy lifting
+ExecStart=/usr/bin/sshuttle --dns --method=tproxy --listen 0.0.0.0 --remote sshuttle_tunnel -s /etc/sshuttle/prefixes.conf -e "ssh -F $${TUNNEL_PROXY}"
+ExecStop=/usr/bin/killall sshuttle
+
+[Install]
+WantedBy=network-online.target
