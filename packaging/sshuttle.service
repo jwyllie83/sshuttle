@@ -9,7 +9,7 @@ Documentation=https://github.com/jwyllie83/sshuttle
 After=network-online.target
 
 [Service]
-Type=forking
+Type=simple
 
 # Set the environment needed for the start and stop scripts
 Environment=PREFIX_LOCATION=/etc/sshuttle/prefixes.conf
@@ -28,8 +28,7 @@ ExecStartPre=/usr/share/sshuttle/scripts/sshuttle-pre-start.sh
 ExecStopPost=/usr/share/sshuttle/scripts/sshuttle-post-stop.sh
 
 # Commands to do the heavy lifting
-ExecStart=/usr/bin/sshuttle --dns --method=tproxy --listen 0.0.0.0 --remote sshuttle_tunnel -s /etc/sshuttle/prefixes.conf -e "ssh -F $${TUNNEL_PROXY}"
-ExecStop=/usr/bin/killall sshuttle
+ExecStart=/usr/bin/sshuttle --dns --method=tproxy --listen 0.0.0.0 --remote sshuttle_tunnel -s /etc/sshuttle/prefixes.conf -e "ssh -F ${TUNNEL_PROXY}"
 
 [Install]
 WantedBy=network-online.target
