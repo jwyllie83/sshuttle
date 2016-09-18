@@ -22,7 +22,6 @@ mkdir -p ${B}/etc/sshuttle/post-stop.d
 mkdir -p ${B}/usr/share/sshuttle/scripts
 mkdir -p ${B}/usr/bin
 mkdir -p ${B}/lib/systemd/system
-mkdir -p ${B}/etc/systemd/system
 mkdir -p ${B}/DEBIAN
 
 # Copy over all of the files

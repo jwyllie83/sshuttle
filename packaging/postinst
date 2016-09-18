@@ -1,6 +1,7 @@
 #!/bin/sh
 set -e
 
+# Set the links to the conf files in case they don't exist
 cd /etc/sshuttle
 # Create the .conf files in /etc/sshuttle if they don't exist
 for F in tunnel prefixes; do
@@ -8,3 +9,6 @@ for F in tunnel prefixes; do
 		ln -s ${F}.conf.dist ${F}.conf
 	fi
 done
+
+# Set the system to start on boot
+systemctl enable sshuttle.service
