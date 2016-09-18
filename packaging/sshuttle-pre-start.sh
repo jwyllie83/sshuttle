@@ -6,7 +6,7 @@
 # doesn't involve shell expansion hell, so I'm not going to bother.
 export LOGFILE=/tmp/sshuttle/sshuttle-pre-start.sh.logs
 mkdir -p "$(dirname "${LOGFILE}")"
-
+ 
 : > "${LOGFILE}"
 
 # Make sure we have created the routes
