@@ -20,6 +20,10 @@ Environment=TUNNEL_PROXY=/etc/sshuttle/tunnel.conf
 Environment=MISC_START_DIR=/etc/sshuttle/pre-start.d
 Environment=MISC_STOP_DIR=/etc/sshuttle/post-stop.d
 
+# We want this thing to restart on failure with some waiting
+Restart=always
+RestartSec=20
+
 # Miscellaneous commands
 PIDFile=/var/run/sshuttle.pid
 
